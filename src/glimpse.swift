@@ -22,6 +22,11 @@ struct Config {
     var width: Int = 800
     var height: Int = 600
     var title: String = "Glimpse"
+    var frameless: Bool = false
+    var floating: Bool = false
+    var transparent: Bool = false
+    var x: Int? = nil
+    var y: Int? = nil
 }
 
 func parseArgs() -> Config {
@@ -39,6 +44,18 @@ func parseArgs() -> Config {
         case "--title":
             i += 1
             if i < args.count { config.title = args[i] }
+        case "--frameless":
+            config.frameless = true
+        case "--floating":
+            config.floating = true
+        case "--transparent":
+            config.transparent = true
+        case "--x":
+            i += 1
+            if i < args.count, let v = Int(args[i]) { config.x = v }
+        case "--y":
+            i += 1
+            if i < args.count, let v = Int(args[i]) { config.y = v }
         default:
             break
         }
@@ -70,14 +87,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
     private func setupWindow() {
         let rect = NSRect(x: 0, y: 0, width: config.width, height: config.height)
+        let styleMask: NSWindow.StyleMask = config.frameless
+            ? [.borderless]
+            : [.titled, .closable, .miniaturizable, .resizable]
         window = NSWindow(
             contentRect: rect,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
         window.title = config.title
-        window.center()
+        if config.frameless {
+            window.isMovableByWindowBackground = true
+        }
+        if config.floating {
+            window.level = .floating
+        }
+        if config.transparent {
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        }
+        if let x = config.x, let y = config.y {
+            window.setFrameOrigin(NSPoint(x: x, y: y))
+        } else {
+            window.center()
+        }
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -106,6 +140,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         webView = WKWebView(frame: window.contentView!.bounds, configuration: wkConfig)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
+        if config.transparent {
+            webView.underPageBackgroundColor = .clear
+        }
         window.contentView?.addSubview(webView)
 
         // Load blank page so didFinish fires and we emit "ready"
