@@ -99,13 +99,13 @@ const DEMO_HTML = `
       <span class="tag">Auto-close</span>
     </div>
     <div class="buttons">
-      <button class="secondary" onclick="window.glimpse.send({action:'docs'})">📖 Docs</button>
-      <button class="primary" onclick="window.glimpse.send({action:'cool'})">🚀 Cool!</button>
+      <button class="secondary" onclick="window.glimpse.close()">✕ Close</button>
+      <button class="primary" onclick="window.glimpse.close()">🚀 Cool!</button>
     </div>
   </div>
   <script>
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' || e.key === 'Enter') window.glimpse.send({action:'close'});
+      if (e.key === 'Escape' || e.key === 'Enter') window.glimpse.close();
     });
   </script>
 </body>`;
