@@ -82,6 +82,10 @@ class GlimpseWindow extends EventEmitter {
   close() {
     this.#write({ type: 'close' });
   }
+
+  followCursor(enabled) {
+    this.#write({ type: 'follow-cursor', enabled });
+  }
 }
 
 export function open(html, options = {}) {
@@ -95,6 +99,18 @@ export function open(html, options = {}) {
   if (options.width != null)  args.push('--width',  String(options.width));
   if (options.height != null) args.push('--height', String(options.height));
   if (options.title != null)  args.push('--title',  options.title);
+
+  if (options.frameless)    args.push('--frameless');
+  if (options.floating)     args.push('--floating');
+  if (options.transparent)  args.push('--transparent');
+  if (options.clickThrough) args.push('--click-through');
+  if (options.followCursor) args.push('--follow-cursor');
+
+  if (options.x != null) args.push('--x', String(options.x));
+  if (options.y != null) args.push('--y', String(options.y));
+
+  if (options.cursorOffset?.x != null) args.push('--cursor-offset-x', String(options.cursorOffset.x));
+  if (options.cursorOffset?.y != null) args.push('--cursor-offset-y', String(options.cursorOffset.y));
 
   const proc = spawn(BINARY, args, { stdio: ['pipe', 'pipe', 'inherit'] });
   return new GlimpseWindow(proc, html);
