@@ -12,6 +12,7 @@ class GlimpseWindow extends EventEmitter {
   #proc;
   #closed = false;
   #pendingHTML = null;
+  #info = null;
 
   constructor(proc, initialHTML) {
     super();
@@ -32,15 +33,22 @@ class GlimpseWindow extends EventEmitter {
       }
 
       switch (msg.type) {
-        case 'ready':
+        case 'ready': {
+          const { type, ...info } = msg;
+          this.#info = info;
           if (this.#pendingHTML) {
             // First ready = blank page loaded. Send the queued HTML.
             this.setHTML(this.#pendingHTML);
             this.#pendingHTML = null;
           } else {
             // Subsequent ready = user HTML loaded. Notify caller.
-            this.emit('ready');
+            this.emit('ready', info);
           }
+          break;
+        }
+        case 'info':
+          this.#info = { screen: msg.screen, screens: msg.screens, appearance: msg.appearance, cursor: msg.cursor };
+          this.emit('info', this.#info);
           break;
         case 'message':
           this.emit('message', msg.data);
@@ -85,6 +93,14 @@ class GlimpseWindow extends EventEmitter {
 
   loadFile(path) {
     this.#write({ type: 'file', path });
+  }
+
+  get info() {
+    return this.#info;
+  }
+
+  getInfo() {
+    this.#write({ type: 'get-info' });
   }
 
   followCursor(enabled) {

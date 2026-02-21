@@ -16,6 +16,72 @@ func log(_ message: String) {
     fputs("[glimpse] \(message)\n", stderr)
 }
 
+// MARK: - System Info
+
+func getSystemInfo() -> [String: Any] {
+    let mouse = NSEvent.mouseLocation
+
+    // Main screen
+    var screenInfo: [String: Any] = [:]
+    if let screen = NSScreen.main {
+        let f = screen.frame
+        let v = screen.visibleFrame
+        screenInfo = [
+            "width": Int(f.width),
+            "height": Int(f.height),
+            "scaleFactor": Int(screen.backingScaleFactor),
+            "visibleX": Int(v.origin.x),
+            "visibleY": Int(v.origin.y),
+            "visibleWidth": Int(v.width),
+            "visibleHeight": Int(v.height),
+        ]
+    }
+
+    // All screens
+    let screens: [[String: Any]] = NSScreen.screens.map { screen in
+        let f = screen.frame
+        let v = screen.visibleFrame
+        return [
+            "x": Int(f.origin.x),
+            "y": Int(f.origin.y),
+            "width": Int(f.width),
+            "height": Int(f.height),
+            "scaleFactor": Int(screen.backingScaleFactor),
+            "visibleX": Int(v.origin.x),
+            "visibleY": Int(v.origin.y),
+            "visibleWidth": Int(v.width),
+            "visibleHeight": Int(v.height),
+        ]
+    }
+
+    // Appearance
+    let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB)
+    let accentHex: String
+    if let c = accent {
+        accentHex = String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+    } else {
+        accentHex = "#007AFF"
+    }
+    let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+
+    return [
+        "screen": screenInfo,
+        "screens": screens,
+        "appearance": [
+            "darkMode": isDark,
+            "accentColor": accentHex,
+            "reduceMotion": reduceMotion,
+            "increaseContrast": increaseContrast,
+        ],
+        "cursor": [
+            "x": Int(mouse.x),
+            "y": Int(mouse.y),
+        ],
+    ]
+}
+
 // MARK: - CLI Config
 
 struct Config {
@@ -292,6 +358,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                 return
             }
             webView.loadFileURL(fileURL, allowingReadAccessTo: fileURL.deletingLastPathComponent())
+        case "get-info":
+            var info = getSystemInfo()
+            info["type"] = "info"
+            writeToStdout(info)
         case "close":
             closeAndExit()
         default:
@@ -309,7 +379,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         MainActor.assumeIsolated {
             window.makeFirstResponder(webView)
-            writeToStdout(["type": "ready"])
+            var info = getSystemInfo()
+            info["type"] = "ready"
+            writeToStdout(info)
         }
     }
 
