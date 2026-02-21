@@ -7,6 +7,9 @@
   "exports": {
     ".": "./src/glimpse.mjs"
   },
+  "bin": {
+    "glimpseui": "bin/glimpse.mjs"
+  },
   "scripts": {
     "build": "swiftc -O src/glimpse.swift -o src/glimpse",
     "postinstall": "npm run build",
@@ -17,6 +20,7 @@
   "files": [
     "src/glimpse.swift",
     "src/glimpse.mjs",
+    "bin/glimpse.mjs",
     "README.md"
   ],
   "engines": {
