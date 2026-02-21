@@ -1,0 +1,26 @@
+{
+  "name": "glimpse",
+  "version": "0.1.0",
+  "description": "Native macOS micro-UI for scripts and agents",
+  "type": "module",
+  "main": "src/glimpse.mjs",
+  "scripts": {
+    "build": "swiftc src/glimpse.swift -o src/glimpse",
+    "postinstall": "npm run build",
+    "test": "node test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin"
+  ],
+  "keywords": [
+    "macos",
+    "webview",
+    "native",
+    "ui",
+    "webkit"
+  ],
+  "license": "MIT"
+}

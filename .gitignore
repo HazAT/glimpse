@@ -1,0 +1,8 @@
+# Compiled binary (do not ignore src/glimpse.swift or src/glimpse.mjs)
+src/glimpse
+
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
