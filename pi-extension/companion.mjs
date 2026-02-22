@@ -62,22 +62,20 @@ body {
   height: 100vh;
 }
 #pill {
-  display: inline-block;
+  width: fit-content;
   overflow: hidden;
+  background: rgba(0,0,0,0.45);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-radius: 8px;
   padding: 2px 0;
-  -webkit-text-stroke: 3px rgba(0,0,0,1);
-  paint-order: stroke fill;
-}
-#pill.light {
-  -webkit-text-stroke: 3px rgba(255,255,255,1);
+  transition: opacity 0.3s ease-out;
 }
 .row {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  overflow: hidden;
-  transition: opacity 0.3s ease-out;
 }
 .dot {
   width: 5px; height: 5px;
@@ -90,46 +88,33 @@ body {
   font-weight: 500;
   flex-shrink: 0;
 }
-#pill.light .project { color: rgba(0,0,0,0.9); }
-.sep { color: rgba(255,255,255,0.4); flex-shrink: 0; }
-#pill.light .sep { color: rgba(0,0,0,0.3); }
+.sep { color: rgba(255,255,255,0.5); flex-shrink: 0; }
 .status { color: rgba(255,255,255,0.9); flex-shrink: 0; }
-#pill.light .status { color: rgba(0,0,0,0.8); }
 .detail {
-  color: rgba(255,255,255,0.7);
+  color: rgba(255,255,255,0.75);
   font-family: ui-monospace, 'SF Mono', monospace;
   font-size: 10px;
   white-space: nowrap;
 }
-#pill.light .detail { color: rgba(0,0,0,0.6); }
 .meta {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 10px 4px 21px;
-  font-size: 9px;
-  font-weight: 400;
-  color: rgba(255,255,255,0.6);
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.85);
   font-family: ui-monospace, 'SF Mono', monospace;
-  -webkit-text-stroke: 0;
-  text-shadow: 0 0 2px rgba(0,0,0,0.6);
 }
-#pill.light .meta { color: rgba(0,0,0,0.5); text-shadow: 0 0 2px rgba(255,255,255,0.6); }
 .meta-sep { margin: 0 2px; }
 </style>
 </head>
 <body>
 <div id="pill"></div>
 <script>
-var _light = false;
 var _rows = {};
 var _startTimes = {};
 var _tickTimer = null;
-
-function setLight(on) {
-  _light = on;
-  document.getElementById('pill').classList.toggle('light', on);
-}
 
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -165,22 +150,20 @@ function update(id, dotColor, project, status, detail, contextPercent) {
 }
 
 function remove(id) {
-  // Fade out then remove
-  var el = document.getElementById('r-' + id);
-  if (el) {
-    el.style.opacity = '0';
-    setTimeout(function() { delete _rows[id]; delete _startTimes[id]; render(); }, 350);
-  } else {
-    delete _rows[id];
-    delete _startTimes[id];
-    render();
-  }
+  delete _rows[id];
+  delete _startTimes[id];
+  render();
 }
 
 function render() {
   var pill = document.getElementById('pill');
   var ids = Object.keys(_rows);
-  if (ids.length === 0) { pill.innerHTML = ''; return; }
+  if (ids.length === 0) {
+    pill.style.opacity = '0';
+    setTimeout(function() { pill.innerHTML = ''; }, 350);
+    return;
+  }
+  pill.style.opacity = '1';
   var html = '';
   for (var i = 0; i < ids.length; i++) {
     var r = _rows[ids[i]];
@@ -208,7 +191,6 @@ function render() {
     html += '</div>';
   }
   pill.innerHTML = html;
-  if (_light) pill.classList.add('light');
 }
 </script>
 </body>
@@ -301,8 +283,8 @@ server.listen(SOCK, () => {
 // ── window ────────────────────────────────────────────────────────────────────
 
 win = open(buildHTML(), {
-  width: 1400,
-  height: 160,
+  width: 600,
+  height: 100,
   frameless: true,
   floating: true,
   transparent: true,
@@ -313,8 +295,6 @@ win = open(buildHTML(), {
 });
 
 win.on('ready', info => {
-  const dark = info?.appearance?.darkMode ?? true;
-  if (!dark) win.send('setLight(true)');
   winReady = true;
   for (const js of pendingUpdates) win.send(js);
   pendingUpdates = [];
