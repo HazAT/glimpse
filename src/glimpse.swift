@@ -82,6 +82,40 @@ func getSystemInfo() -> [String: Any] {
     ]
 }
 
+// MARK: - Cursor Anchor
+
+let safeZoneLeft: CGFloat = 20
+let safeZoneRight: CGFloat = 27
+let safeZoneUp: CGFloat = 15
+let safeZoneDown: CGFloat = 39
+
+func anchorPosition(mouse: NSPoint, windowSize: NSSize, anchor: String) -> NSPoint? {
+    let cx = mouse.x
+    let cy = mouse.y
+    let W = windowSize.width
+    let H = windowSize.height
+    let sL = safeZoneLeft
+    let sR = safeZoneRight
+    let sU = safeZoneUp
+    let sD = safeZoneDown
+    switch anchor {
+    case "top-left":
+        return NSPoint(x: cx - sL - W, y: cy + sU)
+    case "top-right":
+        return NSPoint(x: cx + sR, y: cy + sU)
+    case "right":
+        return NSPoint(x: cx + sR, y: cy - H / 2)
+    case "bottom-right":
+        return NSPoint(x: cx + sR, y: cy - sD - H)
+    case "bottom-left":
+        return NSPoint(x: cx - sL - W, y: cy - sD - H)
+    case "left":
+        return NSPoint(x: cx - sL - W, y: cy - H / 2)
+    default:
+        return nil
+    }
+}
+
 // MARK: - CLI Config
 
 struct Config {
@@ -98,6 +132,7 @@ struct Config {
     var cursorOffsetY: Int = -20
     var clickThrough: Bool = false
     var autoClose: Bool = false
+    var cursorAnchor: String? = nil
 }
 
 func parseArgs() -> Config {
@@ -139,10 +174,27 @@ func parseArgs() -> Config {
             config.clickThrough = true
         case "--auto-close":
             config.autoClose = true
+        case "--cursor-anchor":
+            i += 1
+            if i < args.count { config.cursorAnchor = args[i] }
         default:
             break
         }
         i += 1
+    }
+    // When anchor is set, offsets default to 0 (fine-tuning only).
+    // The non-zero defaults (20, -20) are for offset-only mode.
+    if config.cursorAnchor != nil {
+        var explicitOffsetX = false
+        var explicitOffsetY = false
+        var j = 1
+        while j < args.count {
+            if args[j] == "--cursor-offset-x" { explicitOffsetX = true }
+            if args[j] == "--cursor-offset-y" { explicitOffsetY = true }
+            j += 1
+        }
+        if !explicitOffsetX { config.cursorOffsetX = 0 }
+        if !explicitOffsetY { config.cursorOffsetY = 0 }
     }
     return config
 }
@@ -163,6 +215,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     var webView: WKWebView!
     let config: Config
 
+    // Cursor anchor — mutable so the follow-cursor protocol command can update it at runtime
+    var cursorAnchor: String? = nil
+
     // Mouse monitor references for follow-cursor mode
     var globalMouseMonitor: Any?
     var localMouseMonitor: Any?
@@ -172,6 +227,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        cursorAnchor = config.cursorAnchor
         setupWindow()
         setupWebView()
         if config.followCursor {
@@ -209,9 +265,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         }
         if config.followCursor {
             let mouse = NSEvent.mouseLocation
-            let x = mouse.x + CGFloat(config.cursorOffsetX)
-            let y = mouse.y + CGFloat(config.cursorOffsetY)
-            window.setFrameOrigin(NSPoint(x: x, y: y))
+            if let anchor = cursorAnchor,
+               let base = anchorPosition(mouse: mouse, windowSize: NSSize(width: config.width, height: config.height), anchor: anchor) {
+                let x = base.x + CGFloat(config.cursorOffsetX)
+                let y = base.y + CGFloat(config.cursorOffsetY)
+                window.setFrameOrigin(NSPoint(x: x, y: y))
+            } else {
+                let x = mouse.x + CGFloat(config.cursorOffsetX)
+                let y = mouse.y + CGFloat(config.cursorOffsetY)
+                window.setFrameOrigin(NSPoint(x: x, y: y))
+            }
         } else if let x = config.x, let y = config.y {
             window.setFrameOrigin(NSPoint(x: x, y: y))
         } else {
@@ -231,6 +294,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
         let bridgeJS = """
         window.glimpse = {
+            cursorTip: null,
             send: function(data) {
                 window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify(data));
             },
@@ -267,9 +331,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         let moveHandler: (NSEvent) -> Void = { [weak self] _ in
             guard let self else { return }
             let mouse = NSEvent.mouseLocation
-            let x = mouse.x + CGFloat(self.config.cursorOffsetX)
-            let y = mouse.y + CGFloat(self.config.cursorOffsetY)
-            self.window.setFrameOrigin(NSPoint(x: x, y: y))
+            if let anchor = self.cursorAnchor,
+               let base = anchorPosition(mouse: mouse, windowSize: self.window.frame.size, anchor: anchor) {
+                let x = base.x + CGFloat(self.config.cursorOffsetX)
+                let y = base.y + CGFloat(self.config.cursorOffsetY)
+                self.window.setFrameOrigin(NSPoint(x: x, y: y))
+            } else {
+                let x = mouse.x + CGFloat(self.config.cursorOffsetX)
+                let y = mouse.y + CGFloat(self.config.cursorOffsetY)
+                self.window.setFrameOrigin(NSPoint(x: x, y: y))
+            }
         }
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged],
@@ -278,11 +349,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]) { [weak self] event in
             guard let self else { return event }
             let mouse = NSEvent.mouseLocation
-            let x = mouse.x + CGFloat(self.config.cursorOffsetX)
-            let y = mouse.y + CGFloat(self.config.cursorOffsetY)
-            self.window.setFrameOrigin(NSPoint(x: x, y: y))
+            if let anchor = self.cursorAnchor,
+               let base = anchorPosition(mouse: mouse, windowSize: self.window.frame.size, anchor: anchor) {
+                let x = base.x + CGFloat(self.config.cursorOffsetX)
+                let y = base.y + CGFloat(self.config.cursorOffsetY)
+                self.window.setFrameOrigin(NSPoint(x: x, y: y))
+            } else {
+                let x = mouse.x + CGFloat(self.config.cursorOffsetX)
+                let y = mouse.y + CGFloat(self.config.cursorOffsetY)
+                self.window.setFrameOrigin(NSPoint(x: x, y: y))
+            }
             return event
         }
+    }
+
+    func computeCursorTip() -> [String: Int]? {
+        let H = window.frame.size.height
+        if let anchor = cursorAnchor,
+           let base = anchorPosition(mouse: NSPoint(x: 0, y: 0), windowSize: window.frame.size, anchor: anchor) {
+            // In anchor mode, the offset from mouse to window origin is constant.
+            // base is computed with mouse at (0,0), so base.x/y IS the offset from mouse to window origin.
+            let cssX = 0 - base.x - CGFloat(config.cursorOffsetX)
+            let cssY = H - (0 - base.y - CGFloat(config.cursorOffsetY))
+            return ["x": Int(cssX), "y": Int(cssY)]
+        } else if config.followCursor || globalMouseMonitor != nil {
+            // Offset-only mode: windowOrigin.x = mouse.x + offsetX, windowOrigin.y = mouse.y + offsetY
+            // cssX = mouse.x - windowOrigin.x = -offsetX
+            // cssY = H - (mouse.y - windowOrigin.y) = H - (-offsetY) = H + offsetY
+            let cssX = -config.cursorOffsetX
+            let cssY = Int(H) + config.cursorOffsetY
+            return ["x": cssX, "y": cssY]
+        }
+        return nil
     }
 
     func stopFollowingCursor() {
@@ -346,10 +444,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             webView.evaluateJavaScript(js, completionHandler: nil)
         case "follow-cursor":
             let enabled = json["enabled"] as? Bool ?? true
+            if let anchor = json["anchor"] as? String, !anchor.isEmpty {
+                cursorAnchor = anchor
+            } else if json.keys.contains("anchor") {
+                cursorAnchor = nil
+            }
             if enabled {
                 startFollowingCursor()
             } else {
                 stopFollowingCursor()
+            }
+            if let tip = computeCursorTip() {
+                webView.evaluateJavaScript("window.glimpse.cursorTip = {x: \(tip["x"]!), y: \(tip["y"]!)}", completionHandler: nil)
+            } else {
+                webView.evaluateJavaScript("window.glimpse.cursorTip = null", completionHandler: nil)
             }
         case "file":
             guard let path = json["path"] as? String else {
@@ -365,6 +473,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         case "get-info":
             var info = getSystemInfo()
             info["type"] = "info"
+            if let tip = computeCursorTip() {
+                info["cursorTip"] = tip
+            }
             writeToStdout(info)
         case "close":
             closeAndExit()
@@ -385,6 +496,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             window.makeFirstResponder(webView)
             var info = getSystemInfo()
             info["type"] = "ready"
+            if let tip = computeCursorTip() {
+                info["cursorTip"] = tip
+                webView.evaluateJavaScript("window.glimpse.cursorTip = {x: \(tip["x"]!), y: \(tip["y"]!)}", completionHandler: nil)
+            }
             writeToStdout(info)
         }
     }
@@ -414,6 +529,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     // MARK: - NSWindowDelegate
+
+    func windowDidResize(_ notification: Notification) {
+        if let tip = computeCursorTip() {
+            webView.evaluateJavaScript("window.glimpse.cursorTip = {x: \(tip["x"]!), y: \(tip["y"]!)}", completionHandler: nil)
+        }
+    }
 
     func windowWillClose(_ notification: Notification) {
         writeToStdout(["type": "closed"])

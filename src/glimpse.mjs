@@ -34,7 +34,7 @@ class GlimpseWindow extends EventEmitter {
 
       switch (msg.type) {
         case 'ready': {
-          const { type, ...info } = msg;
+          const info = { screen: msg.screen, screens: msg.screens, appearance: msg.appearance, cursor: msg.cursor, cursorTip: msg.cursorTip ?? null };
           this.#info = info;
           if (this.#pendingHTML) {
             // First ready = blank page loaded. Send the queued HTML.
@@ -47,7 +47,7 @@ class GlimpseWindow extends EventEmitter {
           break;
         }
         case 'info':
-          this.#info = { screen: msg.screen, screens: msg.screens, appearance: msg.appearance, cursor: msg.cursor };
+          this.#info = { screen: msg.screen, screens: msg.screens, appearance: msg.appearance, cursor: msg.cursor, cursorTip: msg.cursorTip ?? null };
           this.emit('info', this.#info);
           break;
         case 'message':
@@ -103,8 +103,10 @@ class GlimpseWindow extends EventEmitter {
     this.#write({ type: 'get-info' });
   }
 
-  followCursor(enabled) {
-    this.#write({ type: 'follow-cursor', enabled });
+  followCursor(enabled, anchor) {
+    const msg = { type: 'follow-cursor', enabled };
+    if (anchor !== undefined) msg.anchor = anchor;
+    this.#write(msg);
   }
 }
 
@@ -132,6 +134,7 @@ export function open(html, options = {}) {
 
   if (options.cursorOffset?.x != null) args.push('--cursor-offset-x', String(options.cursorOffset.x));
   if (options.cursorOffset?.y != null) args.push('--cursor-offset-y', String(options.cursorOffset.y));
+  if (options.cursorAnchor) args.push('--cursor-anchor', options.cursorAnchor);
 
   const proc = spawn(BINARY, args, { stdio: ['pipe', 'pipe', 'inherit'] });
   return new GlimpseWindow(proc, html);

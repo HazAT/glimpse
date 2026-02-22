@@ -56,6 +56,10 @@ body {
   text-rendering: optimizeLegibility;
   font-optical-sizing: auto;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100vh;
 }
 #pill {
   display: inline-block;
@@ -242,7 +246,7 @@ win = open(buildHTML(), {
   transparent: true,
   clickThrough: true,
   followCursor: true,
-  cursorOffset: { x: 10, y: -89 },
+  cursorAnchor: 'top-right',
 });
 
 win.on('ready', info => {

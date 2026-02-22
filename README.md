@@ -100,6 +100,32 @@ win.followCursor(false); // stop tracking
 win.followCursor(true);  // resume tracking
 ```
 
+### Cursor Anchor Snap Points
+
+Instead of raw pixel offsets, use `cursorAnchor` to position the window at one of 6 named snap points around the cursor:
+
+```
+     top-left    top-right
+          \        /
+   left -- 🖱️ -- right
+          /        \
+  bottom-left  bottom-right
+```
+
+A fixed **safe zone** is automatically applied so the window never overlaps the cursor graphic (accounts for the largest macOS system cursors plus 8pt padding). `cursorOffset` can still be used on top of an anchor as a fine-tuning adjustment.
+
+```js
+// Window snaps to the right of the cursor with a safe gap
+const win = open(html, {
+  followCursor: true,
+  cursorAnchor: 'top-right',
+  transparent: true, frameless: true, clickThrough: true,
+});
+
+// Change anchor at runtime
+win.followCursor(true, 'bottom-left');
+```
+
 **Use cases:** animated SVG companions, agent "thinking" indicators, floating tooltips, custom cursor replacements.
 
 ## API Reference
@@ -132,7 +158,8 @@ const win = open('<html>...</html>', {
 | `transparent` | boolean | `false` | Transparent window background |
 | `clickThrough` | boolean | `false` | Window ignores all mouse events |
 | `followCursor` | boolean | `false` | Track cursor position in real-time |
-| `cursorOffset` | `{ x?, y? }` | `{ x: 20, y: -20 }` | Pixel offset from cursor when `followCursor` is on |
+| `cursorAnchor` | string | `null` | Snap point around cursor: `top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left`. Positions window with a safe zone gap; overrides raw offset positioning. |
+| `cursorOffset` | `{ x?, y? }` | `{ x: 20, y: -20 }` | Pixel offset from cursor (or fine-tuning on top of `cursorAnchor`) |
 | `autoClose` | boolean | `false` | Close the window automatically after the first `message` event |
 
 ### `prompt(html, options?)`
@@ -173,6 +200,7 @@ win.on('ready', (info) => {
   console.log(info.appearance); // { darkMode, accentColor, reduceMotion, increaseContrast }
   console.log(info.cursor);     // { x, y }
   console.log(info.screens);    // [{ x, y, width, height, scaleFactor, ... }, ...]
+  console.log(info.cursorTip);  // { x, y } in CSS coords (relative to window top-left), or null when not following
 });
 win.on('message', (msg) => console.log('from page:', msg));
 win.on('closed',  ()    => process.exit(0));
@@ -192,10 +220,11 @@ win.send(`document.getElementById('status').textContent = 'Done'`);
 win.setHTML('<html><body><h1>Step 2</h1></body></html>');
 ```
 
-**`win.followCursor(enabled)`** — Start or stop cursor tracking at runtime.
+**`win.followCursor(enabled, anchor?)`** — Start or stop cursor tracking at runtime. Optional `anchor` sets the snap point (`top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left`).
 ```js
-win.followCursor(true);   // attach to cursor
-win.followCursor(false);  // detach
+win.followCursor(true);              // attach to cursor (uses offset)
+win.followCursor(true, 'top-right'); // attach at top-right snap point
+win.followCursor(false);             // detach
 ```
 
 **`win.info`** — Getter for the last-known system info (screen, appearance, cursor). Available after `ready`.
@@ -230,6 +259,10 @@ window.glimpse.send({ action: 'submit', value: 42 });
 
 // Close the window from inside the page
 window.glimpse.close();
+
+// Cursor tip position in CSS coordinates (px from window top-left, Y down)
+// null when follow-cursor is not active; updated on window resize
+const tip = window.glimpse.cursorTip; // { x: 0, y: 120 } or null
 ```
 
 ## Protocol
@@ -248,9 +281,10 @@ Glimpse uses a newline-delimited JSON (JSON Lines) protocol. Each line is a comp
 {"type":"eval","js":"document.title = 'Updated'"}
 ```
 
-**Follow Cursor** — Toggle cursor tracking at runtime.
+**Follow Cursor** — Toggle cursor tracking at runtime. Optional `anchor` sets the snap point.
 ```json
 {"type":"follow-cursor","enabled":true}
+{"type":"follow-cursor","enabled":true,"anchor":"top-right"}
 {"type":"follow-cursor","enabled":false}
 ```
 
@@ -273,12 +307,14 @@ Glimpse uses a newline-delimited JSON (JSON Lines) protocol. Each line is a comp
 
 **Ready** — WebView finished loading. Includes system info.
 ```json
-{"type":"ready","screen":{"width":2560,"height":1440,"scaleFactor":2,"visibleX":0,"visibleY":48,"visibleWidth":2560,"visibleHeight":1367},"screens":[...],"appearance":{"darkMode":true,"accentColor":"#007AFF","reduceMotion":false,"increaseContrast":false},"cursor":{"x":500,"y":800}}
+{"type":"ready","screen":{"width":2560,"height":1440,"scaleFactor":2,"visibleX":0,"visibleY":48,"visibleWidth":2560,"visibleHeight":1367},"screens":[...],"appearance":{"darkMode":true,"accentColor":"#007AFF","reduceMotion":false,"increaseContrast":false},"cursor":{"x":500,"y":800},"cursorTip":{"x":0,"y":120}}
 ```
+
+`cursorTip` is present when follow-cursor is active. It holds the cursor tip position in CSS coordinates (px from window top-left, Y increases downward). `null` otherwise.
 
 **Info** — Response to a `get-info` command. Same shape as `ready` but with `type: "info"`.
 ```json
-{"type":"info","screen":{...},"screens":[...],"appearance":{...},"cursor":{...}}
+{"type":"info","screen":{...},"screens":[...],"appearance":{...},"cursor":{...},"cursorTip":{"x":0,"y":120}}
 ```
 
 **Message** — Data sent from the page via `window.glimpse.send(...)`.
@@ -317,8 +353,9 @@ Available flags:
 | `--transparent` | off | Transparent window background |
 | `--click-through` | off | Window ignores all mouse events |
 | `--follow-cursor` | off | Track cursor position in real-time |
-| `--cursor-offset-x N` | `20` | Horizontal offset from cursor |
-| `--cursor-offset-y N` | `-20` | Vertical offset from cursor |
+| `--cursor-anchor <position>` | — | Snap point around cursor: `top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left` |
+| `--cursor-offset-x N` | `20` | Horizontal offset from cursor (or fine-tuning on top of `--cursor-anchor`) |
+| `--cursor-offset-y N` | `-20` | Vertical offset from cursor (or fine-tuning on top of `--cursor-anchor`) |
 | `--auto-close` | off | Exit after receiving the first message from the page |
 
 **Shell example — encode HTML and pipe it in:**
