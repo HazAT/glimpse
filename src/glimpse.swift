@@ -182,6 +182,20 @@ func parseArgs() -> Config {
         }
         i += 1
     }
+    // When anchor is set, offsets default to 0 (fine-tuning only).
+    // The non-zero defaults (20, -20) are for offset-only mode.
+    if config.cursorAnchor != nil {
+        var explicitOffsetX = false
+        var explicitOffsetY = false
+        var j = 1
+        while j < args.count {
+            if args[j] == "--cursor-offset-x" { explicitOffsetX = true }
+            if args[j] == "--cursor-offset-y" { explicitOffsetY = true }
+            j += 1
+        }
+        if !explicitOffsetX { config.cursorOffsetX = 0 }
+        if !explicitOffsetY { config.cursorOffsetY = 0 }
+    }
     return config
 }
 
