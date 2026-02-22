@@ -242,7 +242,7 @@ win = open(buildHTML(), {
   transparent: true,
   clickThrough: true,
   followCursor: true,
-  cursorOffset: { x: 10, y: -89 },
+  cursorAnchor: 'top-right',
 });
 
 win.on('ready', info => {
