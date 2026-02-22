@@ -2,7 +2,7 @@
 
 Native macOS micro-UI for scripts and agents.
 
-<video src="assets/demo.mp4" autoplay loop muted playsinline width="600"></video>
+https://github.com/user-attachments/assets/57822cd2-4606-4865-a555-d8ccacd31b40
 
 Glimpse opens a native WKWebView window in under 50ms and speaks a bidirectional JSON Lines protocol over stdin/stdout. No Electron, no browser, no runtime dependencies — just a tiny Swift binary and a Node.js wrapper.
 
