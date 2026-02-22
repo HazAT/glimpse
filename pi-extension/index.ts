@@ -17,6 +17,7 @@ export default function (pi: ExtensionAPI) {
   let enabled = true;
   let sock: Socket | null = null;
   let lastStatus = "";
+  let lastCtx: any = null;
   const project = basename(process.cwd());
 
   // ── socket helpers ────────────────────────────────────────────────────────
@@ -24,9 +25,16 @@ export default function (pi: ExtensionAPI) {
   function send(status: string, detail?: string) {
     lastStatus = status;
     if (!sock || sock.destroyed) return;
-    sock.write(
-      JSON.stringify({ id: SESSION_ID, project, status, detail }) + "\n"
-    );
+    const msg: any = { id: SESSION_ID, project, status, detail };
+    if (lastCtx) {
+      try {
+        const usage = lastCtx.getContextUsage();
+        if (usage && usage.percent != null) {
+          msg.contextPercent = Math.round(usage.percent);
+        }
+      } catch {}
+    }
+    sock.write(JSON.stringify(msg) + "\n");
   }
 
   function sendRemove() {
@@ -120,28 +128,32 @@ export default function (pi: ExtensionAPI) {
 
   // ── event handlers ────────────────────────────────────────────────────────
 
-  pi.on("agent_start", async (_event, _ctx) => {
+  pi.on("agent_start", async (_event, ctx) => {
     if (!enabled) return;
+    lastCtx = ctx;
     await ensureConnected();
     send("starting");
   });
 
-  pi.on("agent_end", async (_event, _ctx) => {
+  pi.on("agent_end", async (_event, ctx) => {
     if (!enabled) return;
+    lastCtx = ctx;
     send("done");
     setTimeout(() => {
       if (lastStatus === "done") sendRemove();
     }, 3000);
   });
 
-  pi.on("message_update", async (_event, _ctx) => {
+  pi.on("message_update", async (_event, ctx) => {
     if (!enabled) return;
+    lastCtx = ctx;
     if (lastStatus === "thinking") return;
     send("thinking");
   });
 
-  pi.on("tool_execution_start", async (event, _ctx) => {
+  pi.on("tool_execution_start", async (event, ctx) => {
     if (!enabled) return;
+    lastCtx = ctx;
     const { toolName, args = {} } = event;
 
     switch (toolName) {
@@ -165,8 +177,9 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("tool_execution_end", async (event, _ctx) => {
+  pi.on("tool_execution_end", async (event, ctx) => {
     if (!enabled) return;
+    lastCtx = ctx;
     if (event.isError) {
       send("error", event.toolName);
     }

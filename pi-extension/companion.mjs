@@ -113,6 +113,7 @@ body {
   font-family: ui-monospace, 'SF Mono', monospace;
 }
 #pill.light .meta { color: rgba(0,0,0,0.35); }
+.meta-sep { margin: 0 2px; }
 </style>
 </head>
 <body>
@@ -154,9 +155,9 @@ function startTick() {
   }, 1000);
 }
 
-function update(id, dotColor, project, status, detail) {
+function update(id, dotColor, project, status, detail, contextPercent) {
   if (!_startTimes[id]) _startTimes[id] = Date.now();
-  _rows[id] = { dotColor: dotColor, project: project, status: status, detail: detail };
+  _rows[id] = { dotColor: dotColor, project: project, status: status, detail: detail, contextPercent: contextPercent };
   render();
   startTick();
 }
@@ -196,6 +197,10 @@ function render() {
     // Meta row
     var elapsed = _startTimes[ids[i]] ? fmtElapsed(Date.now() - _startTimes[ids[i]]) : '';
     html += '<div class="meta">';
+    if (r.contextPercent != null) {
+      html += '<span id="ctx-' + ids[i] + '">' + r.contextPercent + '%</span>';
+      html += '<span class="meta-sep">·</span>';
+    }
     html += '<span id="elapsed-' + ids[i] + '">' + elapsed + '</span>';
     html += '</div>';
     html += '</div>';
@@ -234,7 +239,8 @@ function pushUpdate(id, data) {
   const label = STATUS_LABEL[data.status] ?? '';
   const detail = truncate(data.detail ?? '', 30);
   const project = esc(data.project ?? 'pi');
-  const js = `update(${JSON.stringify(id)},${JSON.stringify(color)},${JSON.stringify(project)},${JSON.stringify(label)},${JSON.stringify(detail)})`;
+  const ctxPct = data.contextPercent ?? null;
+  const js = `update(${JSON.stringify(id)},${JSON.stringify(color)},${JSON.stringify(project)},${JSON.stringify(label)},${JSON.stringify(detail)},${JSON.stringify(ctxPct)})`;
   if (winReady) win.send(js);
   else pendingUpdates.push(js);
 }
