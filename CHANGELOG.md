@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- **Docs**: Add `pi install npm:glimpseui` instructions and `/companion` command to README
+
 ## 0.3.2
 
 Housekeeping release — better docs, organized tests, and a demo video.
