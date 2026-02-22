@@ -113,6 +113,7 @@ body {
 <script>
 var _rows = {};
 var _startTimes = {};
+var _frozenElapsed = {};
 var _tickTimer = null;
 
 function esc(s) {
@@ -133,6 +134,7 @@ function startTick() {
     var ids = Object.keys(_rows);
     if (ids.length === 0) { clearInterval(_tickTimer); _tickTimer = null; return; }
     for (var i = 0; i < ids.length; i++) {
+      if (_frozenElapsed[ids[i]]) continue;
       var el = document.getElementById('elapsed-' + ids[i]);
       if (el && _startTimes[ids[i]]) {
         el.textContent = fmtElapsed(Date.now() - _startTimes[ids[i]]);
@@ -143,6 +145,9 @@ function startTick() {
 
 function update(id, dotColor, project, status, detail, contextPercent) {
   if (!_startTimes[id]) _startTimes[id] = Date.now();
+  if (status === 'Done' && _startTimes[id] && !_frozenElapsed[id]) {
+    _frozenElapsed[id] = fmtElapsed(Date.now() - _startTimes[id]);
+  }
   _rows[id] = { dotColor: dotColor, project: project, status: status, detail: detail, contextPercent: contextPercent };
   render();
   startTick();
@@ -151,6 +156,7 @@ function update(id, dotColor, project, status, detail, contextPercent) {
 function remove(id) {
   delete _rows[id];
   delete _startTimes[id];
+  delete _frozenElapsed[id];
   render();
 }
 
@@ -179,13 +185,18 @@ function render() {
     }
     html += '</div>';
     // Meta row
-    var elapsed = _startTimes[ids[i]] ? fmtElapsed(Date.now() - _startTimes[ids[i]]) : '';
+    var frozen = _frozenElapsed[ids[i]];
+    var elapsed = frozen || (_startTimes[ids[i]] ? fmtElapsed(Date.now() - _startTimes[ids[i]]) : '');
     html += '<div class="meta">';
     if (r.contextPercent != null) {
       html += '<span id="ctx-' + ids[i] + '">' + r.contextPercent + '%</span>';
       html += '<span class="meta-sep">·</span>';
     }
-    html += '<span id="elapsed-' + ids[i] + '">' + elapsed + '</span>';
+    if (frozen) {
+      html += '<span id="elapsed-' + ids[i] + '" style="font-weight:700">' + elapsed + '</span>';
+    } else {
+      html += '<span id="elapsed-' + ids[i] + '">' + elapsed + '</span>';
+    }
     html += '</div>';
     html += '</div>';
   }
