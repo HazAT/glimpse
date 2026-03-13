@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 
 const SOCK = "/tmp/pi-companion.sock";
@@ -13,12 +13,12 @@ const COMPANION_PATH = join(
   fileURLToPath(new URL(".", import.meta.url)),
   "companion.mjs"
 );
-const SETTINGS_PATH = join(homedir(), ".config", "glimpse", "settings.json");
+const SETTINGS_PATH = join(homedir(), ".pi", "companion.json");
 
 function loadEnabled(): boolean {
   try {
     const data = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
-    return data.companionEnabled !== false;
+    return data.enabled !== false;
   } catch {
     return true;
   }
@@ -30,8 +30,7 @@ function saveEnabled(value: boolean) {
     try {
       data = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
     } catch {}
-    data.companionEnabled = value;
-    mkdirSync(join(homedir(), ".config", "glimpse"), { recursive: true });
+    data.enabled = value;
     writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2) + "\n");
   } catch {}
 }
