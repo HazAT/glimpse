@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { getFollowCursorSupport } from "../src/glimpse.mjs";
 
 const SOCK = "/tmp/pi-companion.sock";
 const SESSION_ID = randomUUID().slice(0, 8);
@@ -40,9 +41,17 @@ export default function (pi: ExtensionAPI) {
   let sock: Socket | null = null;
   let lastStatus = "";
   let lastCtx: any = null;
+  let warnedUnsupported = false;
+  const followCursorSupport = getFollowCursorSupport();
   const project = basename(process.cwd());
 
   // ── socket helpers ────────────────────────────────────────────────────────
+
+  function maybeNotifyUnsupported(ctx: any) {
+    if (followCursorSupport.supported || warnedUnsupported) return;
+    warnedUnsupported = true;
+    ctx.ui.notify(`Companion disabled on this platform: ${followCursorSupport.reason}`, "info");
+  }
 
   function send(status: string, detail?: string) {
     lastStatus = status;
@@ -114,6 +123,11 @@ export default function (pi: ExtensionAPI) {
   async function enable(ctx: any) {
     enabled = true;
     saveEnabled(true);
+    if (!followCursorSupport.supported) {
+      maybeNotifyUnsupported(ctx);
+      ctx.ui.setStatus("companion", undefined);
+      return;
+    }
     await ensureConnected();
     const theme = ctx.ui.theme;
     ctx.ui.setStatus(
@@ -147,7 +161,9 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Companion disabled", "info");
       } else {
         await enable(ctx);
-        ctx.ui.notify("Companion enabled", "info");
+        if (followCursorSupport.supported) {
+          ctx.ui.notify("Companion enabled", "info");
+        }
       }
     },
   });
@@ -155,14 +171,14 @@ export default function (pi: ExtensionAPI) {
   // ── event handlers ────────────────────────────────────────────────────────
 
   pi.on("agent_start", async (_event, ctx) => {
-    if (!enabled) return;
+    if (!enabled || !followCursorSupport.supported) return;
     lastCtx = ctx;
     await ensureConnected();
     send("starting");
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (!enabled) return;
+    if (!enabled || !followCursorSupport.supported) return;
     lastCtx = ctx;
     send("done");
     setTimeout(() => {
@@ -171,14 +187,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("message_update", async (_event, ctx) => {
-    if (!enabled) return;
+    if (!enabled || !followCursorSupport.supported) return;
     lastCtx = ctx;
     if (lastStatus === "thinking") return;
     send("thinking");
   });
 
   pi.on("tool_execution_start", async (event, ctx) => {
-    if (!enabled) return;
+    if (!enabled || !followCursorSupport.supported) return;
     lastCtx = ctx;
     const { toolName, args = {} } = event;
 
@@ -204,7 +220,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_end", async (event, ctx) => {
-    if (!enabled) return;
+    if (!enabled || !followCursorSupport.supported) return;
     lastCtx = ctx;
     if (event.isError) {
       send("error", event.toolName);

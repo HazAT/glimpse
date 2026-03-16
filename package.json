@@ -11,8 +11,10 @@
     "glimpseui": "bin/glimpse.mjs"
   },
   "scripts": {
-    "build": "swiftc -O src/glimpse.swift -o src/glimpse",
-    "postinstall": "npm run build",
+    "build": "node scripts/build.mjs",
+    "build:macos": "node scripts/build.mjs darwin",
+    "build:linux": "node scripts/build.mjs linux",
+    "postinstall": "node scripts/postinstall.mjs",
     "test": "node test/test.mjs",
     "publish:check": "./scripts/publish.sh --dry-run",
     "publish:npm": "./scripts/publish.sh"
@@ -20,7 +22,11 @@
   "files": [
     "src/glimpse.swift",
     "src/glimpse.mjs",
+    "src/follow-cursor-support.mjs",
+    "src/linux/",
     "bin/glimpse.mjs",
+    "scripts/build.mjs",
+    "scripts/postinstall.mjs",
     "pi-extension/index.ts",
     "pi-extension/companion.mjs",
     "skills/glimpse/SKILL.md",
@@ -39,7 +45,8 @@
     "node": ">=18"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "linux"
   ],
   "keywords": [
     "macos",

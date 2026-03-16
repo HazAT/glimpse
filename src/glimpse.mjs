@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getFollowCursorSupport, supportsFollowCursor } from './follow-cursor-support.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BINARY = join(__dirname, 'glimpse');
@@ -110,6 +111,11 @@ class GlimpseWindow extends EventEmitter {
   }
 
   followCursor(enabled, anchor, mode) {
+    if (enabled && !supportsFollowCursor()) {
+      const { reason } = getFollowCursorSupport();
+      process.emitWarning(`followCursor disabled: ${reason}`, { code: 'GLIMPSE_FOLLOW_CURSOR_UNSUPPORTED' });
+      return;
+    }
     const msg = { type: 'follow-cursor', enabled };
     if (anchor !== undefined) msg.anchor = anchor;
     if (mode !== undefined) msg.mode = mode;
@@ -117,10 +123,12 @@ class GlimpseWindow extends EventEmitter {
   }
 }
 
+export { getFollowCursorSupport, supportsFollowCursor };
+
 export function open(html, options = {}) {
   if (!existsSync(BINARY)) {
     throw new Error(
-      "Glimpse binary not found. Run 'npm run build' or 'swiftc src/glimpse.swift -o src/glimpse'"
+      "Glimpse binary not found. Run 'npm run build'"
     );
   }
 
@@ -129,11 +137,16 @@ export function open(html, options = {}) {
   if (options.height != null) args.push('--height', String(options.height));
   if (options.title != null)  args.push('--title',  options.title);
 
+  if (options.followCursor && !supportsFollowCursor()) {
+    const { reason } = getFollowCursorSupport();
+    process.emitWarning(`followCursor disabled: ${reason}`, { code: 'GLIMPSE_FOLLOW_CURSOR_UNSUPPORTED' });
+  }
+
   if (options.frameless)    args.push('--frameless');
   if (options.floating)     args.push('--floating');
   if (options.transparent)  args.push('--transparent');
   if (options.clickThrough) args.push('--click-through');
-  if (options.followCursor) args.push('--follow-cursor');
+  if (options.followCursor && supportsFollowCursor()) args.push('--follow-cursor');
   if (options.hidden)      args.push('--hidden');
   if (options.autoClose)   args.push('--auto-close');
 

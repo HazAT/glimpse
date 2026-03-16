@@ -1,0 +1,26 @@
+[package]
+name = "glimpse-linux"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "glimpse"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_12"] }
+webkit6 = "0.6"
+gtk4-layer-shell = { git = "https://github.com/haug1/gtk4-layer-shell-gir.git", branch = "chore/gtk4-0.11-unblock-relm4" }
+gdk4 = "0.11"
+gdk4-wayland = "0.11"
+# Match glib/gio versions used by gtk4 0.11
+gio = "0.22"
+glib = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+base64 = "0.22"
+
+[profile.release]
+opt-level = 2
+strip = true

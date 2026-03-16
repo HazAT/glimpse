@@ -26,7 +26,7 @@ npm install glimpseui
 pi install npm:glimpseui
 ```
 
-Installs the Glimpse skill and companion extension for [pi](https://github.com/mariozechner/pi). The companion is a floating status pill that follows your cursor showing what your agents are doing in real-time. Toggle it with the `/companion` command.
+Installs the Glimpse skill and companion extension for [pi](https://github.com/mariozechner/pi). The companion is a floating status pill that follows your cursor on supported platforms, showing what your agents are doing in real-time. Toggle it with the `/companion` command.
 
 **Manual build:**
 ```bash
@@ -78,6 +78,8 @@ Common combinations:
 ## Follow Cursor
 
 Attach a window to the cursor. Combined with `transparent + frameless + floating + clickThrough`, this creates visual companions that follow the mouse without interfering with normal usage.
+
+> `followCursor` is currently supported on macOS and on Linux under Hyprland via the Hyprland IPC socket. Other Linux environments remain disabled until they have a safe compositor-specific backend.
 
 ```js
 import { open } from './src/glimpse.mjs';
@@ -193,6 +195,20 @@ if (answer?.ok) console.log('Deleted!');
 
 Accepts the same `options` as `open()`. Optional `options.timeout` (ms) rejects the promise if no message arrives in time.
 
+### Cursor Tracking Capability
+
+Use `supportsFollowCursor()` or `getFollowCursorSupport()` to check whether cursor tracking is available on the current runtime before enabling cursor-bound UI.
+
+```js
+import { supportsFollowCursor, getFollowCursorSupport } from 'glimpseui';
+
+if (supportsFollowCursor()) {
+  open(html, { followCursor: true, clickThrough: true, transparent: true, frameless: true });
+} else {
+  console.log(getFollowCursorSupport().reason);
+}
+```
+
 ### GlimpseWindow
 
 `GlimpseWindow` extends `EventEmitter`.
@@ -233,7 +249,7 @@ win.send(`document.getElementById('status').textContent = 'Done'`);
 win.setHTML('<html><body><h1>Step 2</h1></body></html>');
 ```
 
-**`win.followCursor(enabled, anchor?, mode?)`** — Start or stop cursor tracking at runtime. Optional `anchor` sets the snap point (`top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left`). Optional `mode` sets the animation: `snap` (instant) or `spring` (elastic).
+**`win.followCursor(enabled, anchor?, mode?)`** — Start or stop cursor tracking at runtime. Optional `anchor` sets the snap point (`top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left`). Optional `mode` sets the animation: `snap` (instant) or `spring` (elastic). On unsupported platforms, enabling tracking is a no-op and emits a warning.
 ```js
 win.followCursor(true);                        // attach to cursor (uses offset)
 win.followCursor(true, 'top-right');           // attach at top-right snap point
