@@ -13,7 +13,7 @@
   "scripts": {
     "build": "swiftc -O src/glimpse.swift -o src/glimpse",
     "postinstall": "npm run build",
-    "test": "node test/test.mjs && node test/open-links.test.mjs",
+    "test": "node test/test.mjs && node test/open-links.test.mjs && node test/test-status-item.mjs",
     "publish:check": "./scripts/publish.sh --dry-run",
     "publish:npm": "./scripts/publish.sh"
   },

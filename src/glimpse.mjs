@@ -53,6 +53,9 @@ class GlimpseWindow extends EventEmitter {
         case 'message':
           this.emit('message', msg.data);
           break;
+        case 'click':
+          this.emit('click');
+          break;
         case 'closed':
           if (!this.#closed) {
             this.#closed = true;
@@ -77,6 +80,11 @@ class GlimpseWindow extends EventEmitter {
   #write(obj) {
     if (this.#closed) return;
     this.#proc.stdin.write(JSON.stringify(obj) + '\n');
+  }
+
+  /** @internal — for subclass use only */
+  _write(obj) {
+    this.#write(obj);
   }
 
   send(js) {
@@ -117,12 +125,16 @@ class GlimpseWindow extends EventEmitter {
   }
 }
 
-export function open(html, options = {}) {
+function ensureBinary() {
   if (!existsSync(BINARY)) {
     throw new Error(
       "Glimpse binary not found. Run 'npm run build' or 'swiftc src/glimpse.swift -o src/glimpse'"
     );
   }
+}
+
+export function open(html, options = {}) {
+  ensureBinary();
 
   const args = [];
   if (options.width != null)  args.push('--width',  String(options.width));
@@ -149,6 +161,28 @@ export function open(html, options = {}) {
 
   const proc = spawn(BINARY, args, { stdio: ['pipe', 'pipe', 'inherit'] });
   return new GlimpseWindow(proc, html);
+}
+
+class GlimpseStatusItem extends GlimpseWindow {
+  setTitle(title) {
+    this._write({ type: 'title', title });
+  }
+
+  resize(width, height) {
+    this._write({ type: 'resize', width, height });
+  }
+}
+
+export function statusItem(html, options = {}) {
+  ensureBinary();
+
+  const args = ['--status-item'];
+  if (options.width != null)  args.push('--width',  String(options.width));
+  if (options.height != null) args.push('--height', String(options.height));
+  if (options.title != null)  args.push('--title',  options.title);
+
+  const proc = spawn(BINARY, args, { stdio: ['pipe', 'pipe', 'inherit'] });
+  return new GlimpseStatusItem(proc, html);
 }
 
 export function prompt(html, options = {}) {

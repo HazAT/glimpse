@@ -137,6 +137,7 @@ struct Config {
     var followMode: String = "snap"
     var openLinks: Bool = false
     var openLinksApp: String? = nil
+    var statusItem: Bool = false
 }
 
 func parseArgs() -> Config {
@@ -194,6 +195,8 @@ func parseArgs() -> Config {
                 config.openLinks = true
                 config.openLinksApp = args[i]
             }
+        case "--status-item":
+            config.statusItem = true
         default:
             break
         }
@@ -216,11 +219,46 @@ func parseArgs() -> Config {
     return config
 }
 
+// MARK: - WebView Bridge
+
+let bridgeJS = """
+window.glimpse = {
+    cursorTip: null,
+    send: function(data) {
+        window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify(data));
+    },
+    close: function() {
+        window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify({__glimpse_close: true}));
+    }
+};
+"""
+
 // MARK: - Window Subclass (keyboard support for frameless windows)
 
 class GlimpsePanel: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+}
+
+// MARK: - Status Item View Controller
+
+class StatusItemViewController: NSViewController {
+    let webView: WKWebView
+
+    init(webView: WKWebView, size: NSSize) {
+        self.webView = webView
+        super.init(nibName: nil, bundle: nil)
+        self.preferredContentSize = size
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        view = NSView(frame: NSRect(origin: .zero, size: preferredContentSize))
+        webView.frame = view.bounds
+        webView.autoresizingMask = [.width, .height]
+        view.addSubview(webView)
+    }
 }
 
 // MARK: - AppDelegate
@@ -289,26 +327,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         }
     }
 
+    // Status item mode
+    var nsStatusItem: NSStatusItem?
+    var popover: NSPopover?
+    var popoverViewController: StatusItemViewController?
+
     nonisolated init(config: Config) {
         self.config = config
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        hidden = config.hidden
-        cursorAnchor = config.cursorAnchor
-        followMode = config.followMode
-        setupWindow()
-        setupWebView()
-        if config.followCursor {
-            if followMode == "spring" {
-                // Initialize spring position from the window position set by setupWindow()
-                springPosX = window.frame.origin.x
-                springPosY = window.frame.origin.y
-                let target = computeTargetPosition(mouse: NSEvent.mouseLocation)
-                springTargetX = target.x
-                springTargetY = target.y
+        if config.statusItem {
+            setupStatusItem()
+        } else {
+            hidden = config.hidden
+            cursorAnchor = config.cursorAnchor
+            followMode = config.followMode
+            setupWindow()
+            setupWebView()
+            if config.followCursor {
+                if followMode == "spring" {
+                    // Initialize spring position from the window position set by setupWindow()
+                    springPosX = window.frame.origin.x
+                    springPosY = window.frame.origin.y
+                    let target = computeTargetPosition(mouse: NSEvent.mouseLocation)
+                    springTargetX = target.x
+                    springTargetY = target.y
+                }
+                startFollowingCursor()
             }
-            startFollowingCursor()
         }
         startStdinReader()
     }
@@ -370,28 +417,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         }
     }
 
-    private func setupWebView() {
+    private func makeWebViewConfiguration() -> WKWebViewConfiguration {
         let ucc = WKUserContentController()
-
-        let bridgeJS = """
-        window.glimpse = {
-            cursorTip: null,
-            send: function(data) {
-                window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify(data));
-            },
-            close: function() {
-                window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify({__glimpse_close: true}));
-            }
-        };
-        """
         let script = WKUserScript(source: bridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         ucc.addUserScript(script)
         ucc.add(self, name: "glimpse")
-
         let wkConfig = WKWebViewConfiguration()
         wkConfig.userContentController = ucc
+        return wkConfig
+    }
 
-        webView = WKWebView(frame: window.contentView!.bounds, configuration: wkConfig)
+    private func setupWebView() {
+        webView = WKWebView(frame: window.contentView!.bounds, configuration: makeWebViewConfiguration())
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
         if config.transparent {
@@ -402,6 +439,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
         // Load blank page so didFinish fires and we emit "ready"
         webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
+    }
+
+    // MARK: - Status Item
+
+    private func setupStatusItem() {
+        log("Setting up status item mode")
+
+        let size = NSSize(width: config.width, height: config.height)
+        webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: makeWebViewConfiguration())
+        webView.navigationDelegate = self
+
+        // Create view controller and popover
+        popoverViewController = StatusItemViewController(webView: webView, size: size)
+
+        popover = NSPopover()
+        popover!.contentViewController = popoverViewController
+        popover!.contentSize = size
+        popover!.behavior = .transient
+
+        // Create status bar item
+        nsStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = nsStatusItem?.button {
+            button.title = config.title == "Glimpse" ? "G" : config.title
+            button.action = #selector(statusItemClicked(_:))
+            button.target = self
+        }
+
+        // Load blank page to trigger first ready
+        webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
+    }
+
+    @objc func statusItemClicked(_ sender: Any?) {
+        guard let button = nsStatusItem?.button, let popover = popover else { return }
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+        writeToStdout(["type": "click"])
     }
 
     // MARK: - Follow Cursor
@@ -581,6 +657,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             }
             webView.evaluateJavaScript(js, completionHandler: nil)
         case "follow-cursor":
+            guard !config.statusItem else {
+                log("follow-cursor not supported in status-item mode")
+                return
+            }
             let enabled = json["enabled"] as? Bool ?? true
             if let anchor = json["anchor"] as? String, !anchor.isEmpty {
                 cursorAnchor = anchor
@@ -637,21 +717,50 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         case "get-info":
             var info = getSystemInfo()
             info["type"] = "info"
-            if let tip = computeCursorTip() {
+            if !config.statusItem, let tip = computeCursorTip() {
                 info["cursorTip"] = tip
             }
             writeToStdout(info)
         case "show":
-            if let title = json["title"] as? String {
+            if config.statusItem {
+                if let title = json["title"] as? String {
+                    nsStatusItem?.button?.title = title
+                }
+                if let button = nsStatusItem?.button, let popover = popover, !popover.isShown {
+                    popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                }
+            } else {
+                if let title = json["title"] as? String {
+                    window.title = title
+                }
+                hidden = false
+                if !config.clickThrough {
+                    NSApp.setActivationPolicy(.regular)
+                }
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(webView)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        case "title":
+            guard let title = json["title"] as? String else {
+                log("title command: missing title field")
+                return
+            }
+            if config.statusItem {
+                nsStatusItem?.button?.title = title
+            } else {
                 window.title = title
             }
-            hidden = false
-            if !config.clickThrough {
-                NSApp.setActivationPolicy(.regular)
+        case "resize":
+            let w = json["width"] as? Int ?? config.width
+            let h = json["height"] as? Int ?? config.height
+            let size = NSSize(width: w, height: h)
+            if config.statusItem {
+                popover?.contentSize = size
+                popoverViewController?.preferredContentSize = size
+            } else {
+                window.setContentSize(size)
             }
-            window.makeKeyAndOrderFront(nil)
-            window.makeFirstResponder(webView)
-            NSApp.activate(ignoringOtherApps: true)
         case "close":
             closeAndExit()
         default:
@@ -660,6 +769,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     func closeAndExit() {
+        if config.statusItem, let item = nsStatusItem {
+            NSStatusBar.system.removeStatusItem(item)
+            nsStatusItem = nil
+        }
         writeToStdout(["type": "closed"])
         exit(0)
     }
@@ -693,16 +806,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         MainActor.assumeIsolated {
-            if hidden {
-                // WKWebView loading can implicitly order the window in.
-                // Force it back out after every navigation while hidden.
-                window.orderOut(nil)
-            } else {
-                window.makeFirstResponder(webView)
+            if !config.statusItem {
+                if hidden {
+                    // WKWebView loading can implicitly order the window in.
+                    // Force it back out after every navigation while hidden.
+                    window.orderOut(nil)
+                } else {
+                    window.makeFirstResponder(webView)
+                }
             }
             var info = getSystemInfo()
             info["type"] = "ready"
-            if let tip = computeCursorTip() {
+            if !config.statusItem, let tip = computeCursorTip() {
                 info["cursorTip"] = tip
                 webView.evaluateJavaScript("window.glimpse.cursorTip = {x: \(tip["x"]!), y: \(tip["y"]!)}", completionHandler: nil)
             }
@@ -754,5 +869,5 @@ let config = parseArgs()
 let app = NSApplication.shared
 let delegate = AppDelegate(config: config)
 app.delegate = delegate
-app.setActivationPolicy((config.clickThrough || config.hidden) ? .accessory : .regular)
+app.setActivationPolicy((config.statusItem || config.clickThrough || config.hidden) ? .accessory : .regular)
 app.run()
