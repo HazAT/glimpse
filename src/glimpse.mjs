@@ -199,9 +199,10 @@ export function open(html, options = {}) {
   if (options.hidden)       args.push('--hidden');
   if (options.autoClose)    args.push('--auto-close');
 
-  // macOS-only options
-  if (options.openLinks && host.platform !== 'win32')  args.push('--open-links');
-  if (options.openLinksApp && host.platform !== 'win32') args.push('--open-links-app', options.openLinksApp);
+  // macOS-only options (not yet implemented on Linux/Windows; 'override' passes through for testing)
+  const supportsOpenLinks = host.platform === 'darwin' || host.platform === 'override';
+  if (options.openLinks && supportsOpenLinks)  args.push('--open-links');
+  if (options.openLinksApp && supportsOpenLinks) args.push('--open-links-app', options.openLinksApp);
 
   // Follow cursor — gated by capability
   if (options.followCursor && supportsFollowCursor()) {
@@ -211,11 +212,11 @@ export function open(html, options = {}) {
     process.emitWarning(`followCursor disabled: ${reason}`, { code: 'GLIMPSE_FOLLOW_CURSOR_UNSUPPORTED' });
   }
 
-  if (options.x != null) args.push('--x', String(options.x));
-  if (options.y != null) args.push('--y', String(options.y));
+  if (options.x != null) args.push(`--x=${options.x}`);
+  if (options.y != null) args.push(`--y=${options.y}`);
 
-  if (options.cursorOffset?.x != null) args.push('--cursor-offset-x', String(options.cursorOffset.x));
-  if (options.cursorOffset?.y != null) args.push('--cursor-offset-y', String(options.cursorOffset.y));
+  if (options.cursorOffset?.x != null) args.push(`--cursor-offset-x=${options.cursorOffset.x}`);
+  if (options.cursorOffset?.y != null) args.push(`--cursor-offset-y=${options.cursorOffset.y}`);
   if (options.cursorAnchor) args.push('--cursor-anchor', options.cursorAnchor);
   if (options.followMode != null) args.push('--follow-mode', options.followMode);
 

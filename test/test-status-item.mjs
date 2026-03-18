@@ -1,5 +1,11 @@
 import { statusItem } from '../src/glimpse.mjs';
 
+// statusItem is macOS-only
+if (process.platform !== 'darwin') {
+  console.log('glimpse status-item integration test\n  skipped (macOS-only feature)\n');
+  process.exit(0);
+}
+
 const TIMEOUT_MS = 10_000;
 
 const HTML = `<!DOCTYPE html>
