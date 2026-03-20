@@ -1,7 +1,14 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let cached = null;
+
+function nativeBinaryExists() {
+  return existsSync(join(__dirname, 'glimpse'));
+}
 
 function env(name) {
   return (process.env[name] || '').toLowerCase();
@@ -48,11 +55,18 @@ function detect() {
       : { supported: false, reason: 'Hyprland detected but its IPC socket was not found' };
   }
 
-  if (isWayland) {
+  // Chromium backend supports X11 follow-cursor via xdotool
+  const usingChromium = process.env.GLIMPSE_BACKEND === 'chromium' ||
+    (process.platform === 'linux' && !nativeBinaryExists());
+
+  if (isWayland && !usingChromium) {
     return { supported: false, reason: 'Wayland follow-cursor is disabled without a compositor-specific backend' };
   }
 
   if (isX11) {
+    if (usingChromium) {
+      return { supported: true, reason: null };
+    }
     return { supported: false, reason: 'X11 follow-cursor backend is not implemented yet' };
   }
 

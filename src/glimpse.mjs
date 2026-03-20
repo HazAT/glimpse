@@ -8,6 +8,15 @@ import { getFollowCursorSupport, supportsFollowCursor } from './follow-cursor-su
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+function resolveChromiumBackend() {
+  return {
+    path: process.execPath,
+    extraArgs: [join(__dirname, 'chromium-backend.mjs')],
+    platform: 'linux-chromium',
+    buildHint: 'Using system Chromium via CDP (no native binary needed)',
+  };
+}
+
 function resolveNativeHost() {
   const override = process.env.GLIMPSE_BINARY_PATH || process.env.GLIMPSE_HOST_PATH;
   if (override) {
@@ -25,12 +34,22 @@ function resolveNativeHost() {
         platform: 'darwin',
         buildHint: "Run 'npm run build:macos' or 'swiftc -O src/glimpse.swift -o src/glimpse'",
       };
-    case 'linux':
-      return {
-        path: join(__dirname, 'glimpse'),
-        platform: 'linux',
-        buildHint: "Run 'npm run build:linux' (requires Rust toolchain and GTK4/WebKitGTK dev packages)",
-      };
+    case 'linux': {
+      const backend = process.env.GLIMPSE_BACKEND;
+      if (backend === 'chromium') return resolveChromiumBackend();
+
+      const nativePath = join(__dirname, 'glimpse');
+      if (backend === 'native' || existsSync(nativePath)) {
+        return {
+          path: nativePath,
+          platform: 'linux',
+          buildHint: "Run 'npm run build:linux' (requires Rust toolchain and GTK4/WebKitGTK dev packages)",
+        };
+      }
+
+      // Auto-fallback: no native binary found, try Chromium backend
+      return resolveChromiumBackend();
+    }
     case 'win32':
       return {
         path: normalize(join(__dirname, '..', 'native', 'windows', 'bin', 'glimpse.exe')),
@@ -170,6 +189,10 @@ class GlimpseWindow extends EventEmitter {
 
 function ensureBinary() {
   const host = resolveNativeHost();
+
+  // Chromium backend doesn't need a compiled binary -- just node + system Chrome
+  if (host.platform === 'linux-chromium') return host;
+
   if (!existsSync(host.path)) {
     const skippedBuildPath = join(__dirname, '..', '.glimpse-build-skipped');
     const skippedReason = existsSync(skippedBuildPath)
@@ -220,7 +243,8 @@ export function open(html, options = {}) {
   if (options.cursorAnchor) args.push('--cursor-anchor', options.cursorAnchor);
   if (options.followMode != null) args.push('--follow-mode', options.followMode);
 
-  const proc = spawn(host.path, args, {
+  const spawnArgs = [...(host.extraArgs || []), ...args];
+  const proc = spawn(host.path, spawnArgs, {
     stdio: ['pipe', 'pipe', 'inherit'],
     windowsHide: process.platform === 'win32',
   });
@@ -240,8 +264,8 @@ class GlimpseStatusItem extends GlimpseWindow {
 export function statusItem(html, options = {}) {
   const host = ensureBinary();
 
-  if (host.platform !== 'darwin') {
-    throw new Error(`statusItem() is only supported on macOS (current platform: ${host.platform})`);
+  if (host.platform !== 'darwin' && host.platform !== 'linux-chromium') {
+    throw new Error(`statusItem() is only supported on macOS and Linux/Chromium (current platform: ${host.platform})`);
   }
 
   const args = ['--status-item'];
@@ -249,7 +273,8 @@ export function statusItem(html, options = {}) {
   if (options.height != null) args.push('--height', String(options.height));
   if (options.title != null)  args.push('--title',  options.title);
 
-  const proc = spawn(host.path, args, { stdio: ['pipe', 'pipe', 'inherit'] });
+  const spawnArgs = [...(host.extraArgs || []), ...args];
+  const proc = spawn(host.path, spawnArgs, { stdio: ['pipe', 'pipe', 'inherit'] });
   return new GlimpseStatusItem(proc, html);
 }
 
