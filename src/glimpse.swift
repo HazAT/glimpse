@@ -231,6 +231,19 @@ window.glimpse = {
         window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify({__glimpse_close: true}));
     }
 };
+document.addEventListener('mousedown', function(e) {
+    var el = e.target;
+    while (el && el !== document.documentElement) {
+        var region = getComputedStyle(el).getPropertyValue('--app-region').trim();
+        if (region === 'drag') {
+            e.preventDefault();
+            window.webkit.messageHandlers.glimpse.postMessage(JSON.stringify({__glimpse_drag: true}));
+            return;
+        }
+        if (region === 'no-drag') break;
+        el = el.parentElement;
+    }
+});
 """
 
 // MARK: - Window Subclass (keyboard support for frameless windows)
@@ -238,6 +251,22 @@ window.glimpse = {
 class GlimpsePanel: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+}
+
+// Support CSS --app-region: drag for window dragging
+class DraggableWebView: WKWebView {
+    private var lastMouseDownEvent: NSEvent?
+
+    override func mouseDown(with event: NSEvent) {
+        lastMouseDownEvent = event
+        super.mouseDown(with: event)
+    }
+
+    func startWindowDrag() {
+        guard let event = lastMouseDownEvent, let window = self.window else { return }
+        window.performDrag(with: event)
+        lastMouseDownEvent = nil
+    }
 }
 
 // MARK: - Status Item View Controller
@@ -428,7 +457,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     private func setupWebView() {
-        webView = WKWebView(frame: window.contentView!.bounds, configuration: makeWebViewConfiguration())
+        webView = DraggableWebView(frame: window.contentView!.bounds, configuration: makeWebViewConfiguration())
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
         if config.transparent {
@@ -839,6 +868,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
             if json["__glimpse_close"] as? Bool == true {
                 closeAndExit()
+                return
+            }
+
+            if json["__glimpse_drag"] as? Bool == true {
+                (webView as? DraggableWebView)?.startWindowDrag()
+                return
+            }
+
+            if let resize = json["__glimpse_resize"] as? [String: Any],
+               let width = resize["width"] as? NSNumber,
+               let height = resize["height"] as? NSNumber,
+               width.doubleValue > 0,
+               height.doubleValue > 0 {
+                window.setContentSize(NSSize(width: width.doubleValue, height: height.doubleValue))
                 return
             }
 
