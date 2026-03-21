@@ -70,6 +70,7 @@ body {
   border-radius: 8px;
   padding: 2px 0;
   transition: opacity 0.3s ease-out;
+  --app-region: drag;
 }
 .row {
   display: flex;
@@ -116,6 +117,7 @@ var _rows = {};
 var _startTimes = {};
 var _frozenElapsed = {};
 var _tickTimer = null;
+var _lastSize = { w: 0, h: 0 };
 
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -161,11 +163,20 @@ function remove(id) {
   render();
 }
 
+function resizeWindow(width, height) {
+  if (!window.glimpse || typeof window.glimpse.send !== 'function') return;
+  if (width === _lastSize.w && height === _lastSize.h) return;
+  _lastSize.w = width;
+  _lastSize.h = height;
+  window.glimpse.send({ __glimpse_resize: { width: width, height: height } });
+}
+
 function render() {
   var pill = document.getElementById('pill');
   var ids = Object.keys(_rows);
   if (ids.length === 0) {
     pill.style.opacity = '0';
+    resizeWindow(1, 1);
     setTimeout(function() { pill.innerHTML = ''; }, 350);
     return;
   }
@@ -202,6 +213,11 @@ function render() {
     html += '</div>';
   }
   pill.innerHTML = html;
+
+  var rect = pill.getBoundingClientRect();
+  var width = Math.ceil(rect.width);
+  var height = Math.ceil(rect.height);
+  if (width > 0 && height > 0) resizeWindow(width, height);
 }
 </script>
 </body>
@@ -295,17 +311,21 @@ server.listen(SOCK, () => {
 
 // ── window ────────────────────────────────────────────────────────────────────
 
-win = open(buildHTML(), {
+const mode = process.argv.includes('--follow') ? 'follow' : 'static';
+
+const baseOpts = {
   width: 630,
   height: 100,
   frameless: true,
   floating: true,
   transparent: true,
-  clickThrough: true,
-  followCursor: true,
-  followMode: 'spring',
-  cursorAnchor: 'top-right',
-});
+};
+
+const modeOpts = mode === 'follow'
+  ? { clickThrough: true, followCursor: true, followMode: 'spring', cursorAnchor: 'top-right' }
+  : { x: 100, y: 40 };
+
+win = open(buildHTML(), { ...baseOpts, ...modeOpts });
 
 win.on('ready', info => {
   winReady = true;

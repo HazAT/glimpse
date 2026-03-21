@@ -17,28 +17,35 @@ const COMPANION_PATH = join(
 );
 const SETTINGS_PATH = join(homedir(), ".pi", "companion.json");
 
-function loadEnabled(): boolean {
+type CompanionMode = "follow" | "static";
+
+function loadSettings(): { enabled: boolean; mode: CompanionMode } {
   try {
     const data = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
-    return data.enabled === true;
+    return {
+      enabled: data.enabled === true,
+      mode: data.mode === "static" ? "static" : "follow",
+    };
   } catch {
-    return false;
+    return { enabled: false, mode: "follow" };
   }
 }
 
-function saveEnabled(value: boolean) {
+function saveSetting(key: string, value: any) {
   try {
     let data: any = {};
     try {
       data = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
     } catch {}
-    data.enabled = value;
+    data[key] = value;
     writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2) + "\n");
   } catch {}
 }
 
 export default function (pi: ExtensionAPI) {
-  let enabled = loadEnabled();
+  const settings = loadSettings();
+  let enabled = settings.enabled;
+  let mode: CompanionMode = settings.mode;
   let sock: Socket | null = null;
   let lastStatus = "";
   let lastCtx: any = null;
@@ -96,7 +103,8 @@ export default function (pi: ExtensionAPI) {
     if (sock) return;
 
     // Spawn companion and retry
-    const child = spawn(process.execPath, [COMPANION_PATH], {
+    const args = [COMPANION_PATH, ...(mode === "follow" ? ["--follow"] : [])];
+    const child = spawn(process.execPath, args, {
       detached: true,
       stdio: "ignore",
       windowsHide: process.platform === "win32",
@@ -124,8 +132,8 @@ export default function (pi: ExtensionAPI) {
 
   async function enable(ctx: any) {
     enabled = true;
-    saveEnabled(true);
-    if (!followCursorSupport.supported) {
+    saveSetting("enabled", true);
+    if (mode === "follow" && !followCursorSupport.supported) {
       maybeNotifyUnsupported(ctx);
       ctx.ui.setStatus("companion", undefined);
       return;
@@ -140,7 +148,7 @@ export default function (pi: ExtensionAPI) {
 
   function disable(ctx: any) {
     enabled = false;
-    saveEnabled(false);
+    saveSetting("enabled", false);
     disconnect();
     ctx.ui.setStatus("companion", undefined);
   }
@@ -156,15 +164,35 @@ export default function (pi: ExtensionAPI) {
   // ── /companion command ────────────────────────────────────────────────────
 
   pi.registerCommand("companion", {
-    description: "Toggle cursor companion (shows agent activity near cursor)",
-    handler: async (_args, ctx) => {
+    description:
+      "Toggle companion or set mode: /companion, /companion follow, /companion static",
+    handler: async (args, ctx) => {
+      const arg = (args ?? "").trim();
+
+      if (arg === "follow" || arg === "static") {
+        const newMode = arg as CompanionMode;
+        if (newMode !== mode) {
+          mode = newMode;
+          saveSetting("mode", mode);
+          // Restart companion with new mode
+          disconnect();
+          if (enabled) {
+            await enable(ctx);
+            ctx.ui.notify(`Companion mode: ${mode}`, "info");
+          }
+        } else {
+          ctx.ui.notify(`Already in ${mode} mode`, "info");
+        }
+        return;
+      }
+
       if (enabled) {
         disable(ctx);
         ctx.ui.notify("Companion disabled", "info");
       } else {
         await enable(ctx);
-        if (followCursorSupport.supported) {
-          ctx.ui.notify("Companion enabled", "info");
+        if (mode === "static" || followCursorSupport.supported) {
+          ctx.ui.notify(`Companion enabled (${mode})`, "info");
         }
       }
     },
@@ -172,15 +200,21 @@ export default function (pi: ExtensionAPI) {
 
   // ── event handlers ────────────────────────────────────────────────────────
 
+  function isActive() {
+    if (!enabled) return false;
+    if (mode === "follow" && !followCursorSupport.supported) return false;
+    return true;
+  }
+
   pi.on("agent_start", async (_event, ctx) => {
-    if (!enabled || !followCursorSupport.supported) return;
+    if (!isActive()) return;
     lastCtx = ctx;
     await ensureConnected();
     send("starting");
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (!enabled || !followCursorSupport.supported) return;
+    if (!isActive()) return;
     lastCtx = ctx;
     send("done");
     setTimeout(() => {
@@ -189,14 +223,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("message_update", async (_event, ctx) => {
-    if (!enabled || !followCursorSupport.supported) return;
+    if (!isActive()) return;
     lastCtx = ctx;
     if (lastStatus === "thinking") return;
     send("thinking");
   });
 
   pi.on("tool_execution_start", async (event, ctx) => {
-    if (!enabled || !followCursorSupport.supported) return;
+    if (!isActive()) return;
     lastCtx = ctx;
     const { toolName, args = {} } = event;
 
@@ -222,7 +256,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_end", async (event, ctx) => {
-    if (!enabled || !followCursorSupport.supported) return;
+    if (!isActive()) return;
     lastCtx = ctx;
     if (event.isError) {
       send("error", event.toolName);
