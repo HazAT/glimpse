@@ -16,7 +16,7 @@
     "build:linux": "node scripts/build.mjs linux",
     "build:windows": "node scripts/build.mjs win32",
     "postinstall": "node scripts/postinstall.mjs",
-    "test": "node test/test.mjs && node test/open-links.test.mjs && node test/test-status-item.mjs",
+    "test": "node test/test.mjs && node test/open-links.test.mjs && node test/companion-mode.test.mjs && node test/test-status-item.mjs",
     "test:platform": "node test/platform.mjs",
     "publish:check": "./scripts/publish.sh --dry-run",
     "publish:npm": "./scripts/publish.sh"
