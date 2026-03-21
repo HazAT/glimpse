@@ -35,7 +35,12 @@ npm run build:windows    # dotnet publish
 pi install npm:glimpseui
 ```
 
-Installs the Glimpse skill and companion extension for [pi](https://github.com/mariozechner/pi). The companion is a floating status pill that follows your cursor showing what your agents are doing in real-time. It's hidden by default — enable it with the `/companion` command.
+Installs the Glimpse skill and companion extension for [pi](https://github.com/mariozechner/pi). The companion is a floating status pill that shows what your agents are doing in real-time. It supports two modes:
+
+- **follow** — default on platforms with follow-cursor support; the pill follows your cursor near the top-right of the pointer
+- **static** — pins the pill to a fixed position near the top of the main screen (no cursor tracking, works everywhere)
+
+Use `/companion` to toggle the companion, and `/companion follow` or `/companion static` to switch modes. On platforms without follow-cursor support, follow mode is disabled but static mode still works. On macOS, the static pill can also be dragged via CSS drag regions.
 
 ## Quick Start
 
@@ -76,6 +81,28 @@ Common combinations:
 - **Custom dialog**: `frameless: true` — clean UI with no system chrome
 - **Overlay**: `frameless + transparent` — shaped widgets that float over content
 - **Companion widget**: `frameless + transparent + floating + clickThrough` — visual-only overlays that don't interfere with the desktop
+
+### CSS Drag Regions (frameless windows)
+
+On macOS, frameless windows can opt into HTML-defined drag handles using a CSS custom property:
+
+- `--app-region: drag` — the element acts like a title bar; dragging it moves the window
+- `--app-region: no-drag` — opt a subtree out of dragging (e.g. buttons, links)
+
+This is useful for overlay-style UIs where only a specific pill or header should be draggable while the rest of the window remains fully interactive.
+
+Example:
+
+```html
+<body style="margin: 0; background: transparent;">
+  <div id="titlebar" style="--app-region: drag; padding: 8px 12px;">
+    My Glimpse App
+  </div>
+  <button style="--app-region: no-drag">Click me</button>
+</body>
+```
+
+On non-macOS platforms, `--app-region` is ignored and the window behaves like a normal frameless WebView.
 
 ## Follow Cursor
 

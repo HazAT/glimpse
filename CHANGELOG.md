@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2
+
+- **Feature**: CSS drag regions for frameless macOS windows — elements with `--app-region: drag` become draggable window chrome, while `--app-region: no-drag` opt child controls out of dragging. This powers the draggable companion pill while keeping its contents clickable.
+- **Feature**: Companion modes — `/companion follow` and `/companion static` now select between a cursor-following pill and a fixed-position pill. Follow mode is gated by `supportsFollowCursor()` on each platform; static mode works everywhere, with dragging enabled on macOS.
+- **Docs**: Document CSS drag regions and companion modes in README, including cross-platform behavior.
+- **Tests**: Add a regression test to ensure the companion process passes the expected follow/static options through to the native host.
+
 ## 0.6.1
 
 - **Change**: Companion is now hidden by default — enable it with `/companion`. Previously it was shown by default. Existing preferences in `~/.pi/companion.json` are respected.
