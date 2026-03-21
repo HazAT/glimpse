@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- **Change**: Companion is now hidden by default — enable it with `/companion`. Previously it was shown by default. Existing preferences in `~/.pi/companion.json` are respected.
+
 ## 0.6.0
 
 Two community contributions expanding Linux support — thank you [@Whamp](https://github.com/Whamp) and [@hjanuschka](https://github.com/hjanuschka)! 🎉

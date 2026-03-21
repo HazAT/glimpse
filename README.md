@@ -35,7 +35,7 @@ npm run build:windows    # dotnet publish
 pi install npm:glimpseui
 ```
 
-Installs the Glimpse skill and companion extension for [pi](https://github.com/mariozechner/pi). The companion is a floating status pill that follows your cursor showing what your agents are doing in real-time. Toggle it with the `/companion` command.
+Installs the Glimpse skill and companion extension for [pi](https://github.com/mariozechner/pi). The companion is a floating status pill that follows your cursor showing what your agents are doing in real-time. It's hidden by default — enable it with the `/companion` command.
 
 ## Quick Start
 

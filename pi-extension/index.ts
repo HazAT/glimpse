@@ -20,9 +20,9 @@ const SETTINGS_PATH = join(homedir(), ".pi", "companion.json");
 function loadEnabled(): boolean {
   try {
     const data = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8"));
-    return data.enabled !== false;
+    return data.enabled === true;
   } catch {
-    return true;
+    return false;
   }
 }
 
