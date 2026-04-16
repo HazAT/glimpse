@@ -14,8 +14,9 @@ native/windows/obj/
 # Dependencies
 node_modules/
 
-# Local dev
-.pi/
+# Local dev — track skills, ignore the rest
+.pi/*
+!.pi/skills/
 
 # macOS
 .DS_Store
