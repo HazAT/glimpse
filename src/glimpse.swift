@@ -138,6 +138,7 @@ struct Config {
     var openLinks: Bool = false
     var openLinksApp: String? = nil
     var statusItem: Bool = false
+    var noDock: Bool = false
 }
 
 func parseArgs() -> Config {
@@ -197,6 +198,8 @@ func parseArgs() -> Config {
             }
         case "--status-item":
             config.statusItem = true
+        case "--no-dock":
+            config.noDock = true
         default:
             break
         }
@@ -734,7 +737,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                     window.title = title
                 }
                 hidden = false
-                if !config.clickThrough {
+                if !config.clickThrough && !config.noDock {
                     NSApp.setActivationPolicy(.regular)
                 }
                 window.makeKeyAndOrderFront(nil)
@@ -869,5 +872,5 @@ let config = parseArgs()
 let app = NSApplication.shared
 let delegate = AppDelegate(config: config)
 app.delegate = delegate
-app.setActivationPolicy((config.statusItem || config.clickThrough || config.hidden) ? .accessory : .regular)
+app.setActivationPolicy((config.statusItem || config.clickThrough || config.hidden || config.noDock) ? .accessory : .regular)
 app.run()

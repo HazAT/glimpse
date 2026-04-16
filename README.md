@@ -69,6 +69,7 @@ Glimpse supports several window style flags that can be combined freely:
 | `floating` | Always on top of other windows |
 | `transparent` | Clear window background — HTML body needs `background: transparent` |
 | `clickThrough` | Window ignores all mouse events |
+| `noDock` | No dock icon (macOS) — window works normally but the app doesn't appear in the dock or app switcher |
 
 Common combinations:
 
@@ -202,6 +203,7 @@ const win = open('<html>...</html>', {
 | `openLinksApp` | string | — | App bundle path for opening links, e.g. `"/Applications/Firefox.app"` (macOS only) |
 | `hidden` | boolean | `false` | Start hidden (prewarm mode) — load HTML in the background, reveal with `win.show()` |
 | `autoClose` | boolean | `false` | Close automatically after the first `message` event |
+| `noDock` | boolean | `false` | No dock icon or app switcher entry (macOS) — window still receives focus and keyboard input |
 
 ### `statusItem(html, options?)` — macOS only
 
@@ -476,6 +478,7 @@ npx glimpseui page.html --frameless --transparent
 | `--status-item` | off | Menu bar mode instead of window (macOS) |
 | `--hidden` | off | Start hidden (prewarm) |
 | `--auto-close` | off | Exit after first message |
+| `--no-dock` | off | No dock icon (macOS) |
 
 **Shell example:**
 ```bash

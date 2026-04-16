@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Feature**: `--no-dock` flag / `noDock` option — hide the dock icon and app switcher entry on macOS. The window still works normally (focus, keyboard input, etc.) but the app stays invisible in the dock. Useful for embedded/subprocess usage where no dock presence is desired.
+
 ## 0.6.2
 
 - **Fix**: Include `chromium-backend.mjs` in npm `files` array — the Chromium CDP backend was missing from published packages, breaking the Linux fallback. Thanks [@fredheir](https://github.com/fredheir)! ([#9](https://github.com/HazAT/glimpse/pull/9))

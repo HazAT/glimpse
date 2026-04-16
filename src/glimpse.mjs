@@ -219,6 +219,7 @@ export function open(html, options = {}) {
   if (options.floating)     args.push('--floating');
   if (options.transparent)  args.push('--transparent');
   if (options.clickThrough) args.push('--click-through');
+  if (options.noDock)       args.push('--no-dock');
   if (options.hidden)       args.push('--hidden');
   if (options.autoClose)    args.push('--auto-close');
 

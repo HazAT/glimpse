@@ -76,6 +76,7 @@ win.close();                         // close window
   openLinks: true,        // open clicked http/https links in default browser
   openLinksApp: '/Applications/Google Chrome.app', // optional app bundle path
   autoClose: true,        // close after first message
+  noDock: true,           // no dock icon or app switcher entry (macOS)
   x, y,                   // exact screen position
   timeout,                // for prompt() only — ms before rejecting
 }

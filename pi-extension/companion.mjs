@@ -302,6 +302,7 @@ win = open(buildHTML(), {
   floating: true,
   transparent: true,
   clickThrough: true,
+  noDock: true,
   followCursor: true,
   followMode: 'spring',
   cursorAnchor: 'top-right',
