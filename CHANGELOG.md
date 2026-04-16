@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - **Feature**: `--no-dock` flag / `noDock` option — hide the dock icon and app switcher entry on macOS. The window still works normally (focus, keyboard input, etc.) but the app stays invisible in the dock. Useful for embedded/subprocess usage where no dock presence is desired.
 

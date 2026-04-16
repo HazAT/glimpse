@@ -1,6 +1,6 @@
 {
   "name": "glimpseui",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Native micro-UI for scripts and agents — cross-platform WebView windows with bidirectional JSON communication",
   "type": "module",
   "main": "src/glimpse.mjs",

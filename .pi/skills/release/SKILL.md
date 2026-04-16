@@ -7,6 +7,8 @@ description: Create a release, publish to npm, and create a GitHub release. Use 
 
 Create a versioned release: bump version, update changelog, publish to npm, tag, push, and create a GitHub release.
 
+**Prerequisite:** This skill uses cmux for interactive steps (npm login, publish). Ensure you're running inside cmux.
+
 ## Step 1: Determine Version
 
 Check the current version and latest git tag:
@@ -86,37 +88,105 @@ Bump the version in `package.json`:
 ```bash
 git add package.json CHANGELOG.md
 git commit -m "chore(release): v<VERSION>"
+```
+
+Do NOT tag here — the publish script handles tagging.
+
+## Step 6: Ensure npm Login (interactive via cmux)
+
+Spawn a cmux surface to verify npm auth. The user may need to complete OTP/browser auth:
+
+```bash
+SURFACE=$(cmux new-surface --type terminal | awk '{print $2}')
+sleep 0.5
+cmux send --surface $SURFACE 'npm whoami\n'
+```
+
+Poll for output. If logged in, you'll see the username. If not:
+
+```bash
+cmux send --surface $SURFACE 'npm login\n'
+```
+
+Tell the user to complete authentication in the cmux tab, then poll until `npm whoami` succeeds:
+
+```bash
+# Poll loop
+for i in $(seq 1 60); do
+  OUTPUT=$(cmux read-screen --surface $SURFACE --lines 5)
+  if echo "$OUTPUT" | grep -qE "^[a-zA-Z0-9]"; then
+    # Got a username line — logged in
+    break
+  fi
+  sleep 2
+done
+```
+
+Close the surface when done:
+
+```bash
+cmux close-surface --surface $SURFACE
+```
+
+## Step 7: Publish to npm (interactive via cmux)
+
+Run the publish script in a cmux surface so the user can interact with confirmation prompts and OTP challenges:
+
+```bash
+SURFACE=$(cmux new-surface --type terminal | awk '{print $2}')
+sleep 0.5
+cmux send --surface $SURFACE 'cd <PROJECT_ROOT> && ./scripts/publish.sh\n'
+```
+
+Tell the user the publish script is running in the cmux tab and they may need to:
+- Confirm the publish (`y`)
+- Complete OTP/browser authentication if prompted
+
+Poll for completion — look for the success message or error:
+
+```bash
+# Poll loop — check every 3 seconds for up to 3 minutes
+for i in $(seq 1 60); do
+  OUTPUT=$(cmux read-screen --surface $SURFACE --lines 20)
+  if echo "$OUTPUT" | grep -q "Published glimpseui@"; then
+    echo "Published successfully"
+    break
+  fi
+  if echo "$OUTPUT" | grep -q "Aborted\|npm error\|✗"; then
+    echo "Publish failed — check output"
+    break
+  fi
+  sleep 3
+done
+```
+
+Read the final output for the user:
+
+```bash
+cmux read-screen --surface $SURFACE --scrollback --lines 50
+```
+
+Close the surface when done:
+
+```bash
+cmux close-surface --surface $SURFACE
+```
+
+If the publish script already tagged the release, skip to Step 9 (Push).
+
+## Step 8: Tag (if not done by publish script)
+
+```bash
 git tag v<VERSION>
 ```
 
-## Step 6: Publish to npm
-
-Run the publish script which handles preflight checks (clean tree, main branch, npm auth, build, tests):
-
-```bash
-./scripts/publish.sh
-```
-
-**Important:** The publish script checks for a clean working tree and runs build + tests. Since we already committed in Step 5, the tree should be clean. The script will prompt for confirmation — answer `y`.
-
-If `publish.sh` also tags (it does), skip the `git tag` in Step 5 to avoid duplicate tags. Check the script behavior first.
-
-**Alternative** (if the script flow conflicts): publish manually after the commit:
-
-```bash
-npm run build
-npm test
-npm publish
-git tag v<VERSION>
-```
-
-## Step 7: Push
+## Step 9: Push
 
 ```bash
 git push && git push --tags
 ```
 
-## Step 8: Create GitHub Release
+## Step 10: Create GitHub Release
 
 ```bash
 gh release create v<VERSION> --title "v<VERSION>" --notes "<CHANGELOG>"
@@ -130,7 +200,7 @@ gh release create v<VERSION> --title "v<VERSION>" --notes-file /tmp/release-note
 rm /tmp/release-notes.md
 ```
 
-## Step 9: Verify
+## Step 11: Verify
 
 Confirm the release was created:
 
