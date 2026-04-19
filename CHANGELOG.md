@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- **Breaking**: The pi companion extension is no longer auto-registered. It's moved to `examples/companion/` — add it manually to your pi extensions config if you want it.
+- **Fix**: Swift strict concurrency error in `startStdinReader` — thanks [@jfanals](https://github.com/jfanals)! ([#13](https://github.com/HazAT/glimpse/pull/13))
+
 ## 0.7.0
 
 - **Feature**: `--no-dock` flag / `noDock` option — hide the dock icon and app switcher entry on macOS. The window still works normally (focus, keyboard input, etc.) but the app stays invisible in the dock. Useful for embedded/subprocess usage where no dock presence is desired.
