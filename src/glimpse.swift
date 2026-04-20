@@ -334,6 +334,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     var nsStatusItem: NSStatusItem?
     var popover: NSPopover?
     var popoverViewController: StatusItemViewController?
+    var statusMenu: NSMenu?
 
     nonisolated init(config: Config) {
         self.config = config
@@ -467,6 +468,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             button.title = config.title == "Glimpse" ? "G" : config.title
             button.action = #selector(statusItemClicked(_:))
             button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         // Load blank page to trigger first ready
@@ -475,12 +477,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
     @objc func statusItemClicked(_ sender: Any?) {
         guard let button = nsStatusItem?.button, let popover = popover else { return }
+        if let event = NSApp.currentEvent,
+           (event.type == .rightMouseUp || (event.type == .leftMouseUp && event.modifierFlags.contains(.control))),
+           let statusMenu {
+            NSMenu.popUpContextMenu(statusMenu, with: event, for: button)
+            return
+        }
         if popover.isShown {
             popover.performClose(sender)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
         writeToStdout(["type": "click"])
+    }
+
+    @objc func statusMenuItemSelected(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String {
+            writeToStdout(["type": "menu", "id": id])
+        }
     }
 
     // MARK: - Follow Cursor
@@ -766,6 +780,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             } else {
                 window.setContentSize(size)
             }
+        case "status-menu":
+            guard config.statusItem else {
+                log("status-menu not supported outside status-item mode")
+                return
+            }
+            let items = json["items"] as? [[String: Any]] ?? []
+            let menu = NSMenu()
+            for item in items {
+                guard let id = item["id"] as? String, let title = item["title"] as? String else {
+                    continue
+                }
+                let menuItem = NSMenuItem(title: title, action: #selector(statusMenuItemSelected(_:)), keyEquivalent: "")
+                menuItem.target = self
+                menuItem.representedObject = id
+                menu.addItem(menuItem)
+            }
+            statusMenu = menu.items.isEmpty ? nil : menu
         case "close":
             closeAndExit()
         default:
