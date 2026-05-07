@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 gtk4 = { version = "0.11", features = ["v4_12"] }
 webkit6 = "0.6"
-gtk4-layer-shell = { git = "https://github.com/haug1/gtk4-layer-shell-gir.git", branch = "chore/gtk4-0.11-unblock-relm4" }
+gtk4-layer-shell = "0.8.0"
 gdk4 = "0.11"
 gdk4-wayland = "0.11"
 gio = "0.22"
