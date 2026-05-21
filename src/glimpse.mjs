@@ -113,6 +113,9 @@ class GlimpseWindow extends EventEmitter {
         case 'click':
           this.emit('click');
           break;
+        case 'menu':
+          this.emit('menu', msg.id);
+          break;
         case 'closed':
           if (!this.#closed) {
             this.#closed = true;
@@ -255,6 +258,10 @@ export function open(html, options = {}) {
 class GlimpseStatusItem extends GlimpseWindow {
   setTitle(title) {
     this._write({ type: 'title', title });
+  }
+
+  setMenu(items) {
+    this._write({ type: 'status-menu', items });
   }
 
   resize(width, height) {
