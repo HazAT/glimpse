@@ -20,7 +20,20 @@ pub fn collect(
         }
     }
 
-    let primary = if let Some(first) = screens.first() {
+    let active = cursor_pos
+        .and_then(|cursor| {
+            screens.iter().find(|screen| {
+                let x = screen.x.unwrap_or(0);
+                let y = screen.y.unwrap_or(0);
+                cursor.x >= x
+                    && cursor.x < x + screen.width
+                    && cursor.y >= y
+                    && cursor.y < y + screen.height
+            })
+        })
+        .or_else(|| screens.first());
+
+    let primary = if let Some(first) = active {
         ScreenInfo {
             x: None,
             y: None,

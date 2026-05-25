@@ -67,6 +67,19 @@ export function getNativeHostInfo() {
 
 export { getFollowCursorSupport, supportsFollowCursor };
 
+function kioskIgnoredOptions(options) {
+  const ignored = [];
+  if (options.width != null) ignored.push('width');
+  if (options.height != null) ignored.push('height');
+  if (options.x != null) ignored.push('x');
+  if (options.y != null) ignored.push('y');
+  if (options.followCursor) ignored.push('followCursor');
+  if (options.followMode != null) ignored.push('followMode');
+  if (options.cursorAnchor != null) ignored.push('cursorAnchor');
+  if (options.cursorOffset?.x != null || options.cursorOffset?.y != null) ignored.push('cursorOffset');
+  return ignored;
+}
+
 class GlimpseWindow extends EventEmitter {
   #proc;
   #closed = false;
@@ -112,6 +125,12 @@ class GlimpseWindow extends EventEmitter {
           break;
         case 'click':
           this.emit('click');
+          break;
+        case 'kiosk':
+          this.emit('kiosk', {
+            active: Boolean(msg.active),
+            reason: msg.reason ?? null,
+          });
           break;
         case 'closed':
           if (!this.#closed) {
@@ -185,6 +204,10 @@ class GlimpseWindow extends EventEmitter {
     if (mode !== undefined) msg.mode = mode;
     this.#write(msg);
   }
+
+  kiosk(enabled = true) {
+    this.#write({ type: 'kiosk', enabled });
+  }
 }
 
 function ensureBinary() {
@@ -209,16 +232,27 @@ function ensureBinary() {
 
 export function open(html, options = {}) {
   const host = ensureBinary();
+  const kiosk = Boolean(options.kiosk);
+
+  if (kiosk) {
+    const ignored = kioskIgnoredOptions(options);
+    if (ignored.length > 0) {
+      process.emitWarning(`kiosk ignores option(s): ${ignored.join(', ')}`, {
+        code: 'GLIMPSE_KIOSK_IGNORED_OPTIONS',
+      });
+    }
+  }
 
   const args = [];
-  if (options.width != null)  args.push('--width',  String(options.width));
-  if (options.height != null) args.push('--height', String(options.height));
+  if (!kiosk && options.width != null)  args.push('--width',  String(options.width));
+  if (!kiosk && options.height != null) args.push('--height', String(options.height));
   if (options.title != null)  args.push('--title',  options.title);
 
   if (options.frameless)    args.push('--frameless');
   if (options.floating)     args.push('--floating');
   if (options.transparent)  args.push('--transparent');
   if (options.clickThrough) args.push('--click-through');
+  if (kiosk)                args.push('--kiosk');
   if (options.noDock)       args.push('--no-dock');
   if (options.hidden)       args.push('--hidden');
   if (options.autoClose)    args.push('--auto-close');
@@ -229,20 +263,20 @@ export function open(html, options = {}) {
   if (options.openLinksApp && supportsOpenLinks) args.push('--open-links-app', options.openLinksApp);
 
   // Follow cursor — gated by capability
-  if (options.followCursor && supportsFollowCursor()) {
+  if (!kiosk && options.followCursor && supportsFollowCursor()) {
     args.push('--follow-cursor');
-  } else if (options.followCursor) {
+  } else if (!kiosk && options.followCursor) {
     const { reason } = getFollowCursorSupport();
     process.emitWarning(`followCursor disabled: ${reason}`, { code: 'GLIMPSE_FOLLOW_CURSOR_UNSUPPORTED' });
   }
 
-  if (options.x != null) args.push(`--x=${options.x}`);
-  if (options.y != null) args.push(`--y=${options.y}`);
+  if (!kiosk && options.x != null) args.push(`--x=${options.x}`);
+  if (!kiosk && options.y != null) args.push(`--y=${options.y}`);
 
-  if (options.cursorOffset?.x != null) args.push(`--cursor-offset-x=${options.cursorOffset.x}`);
-  if (options.cursorOffset?.y != null) args.push(`--cursor-offset-y=${options.cursorOffset.y}`);
-  if (options.cursorAnchor) args.push('--cursor-anchor', options.cursorAnchor);
-  if (options.followMode != null) args.push('--follow-mode', options.followMode);
+  if (!kiosk && options.cursorOffset?.x != null) args.push(`--cursor-offset-x=${options.cursorOffset.x}`);
+  if (!kiosk && options.cursorOffset?.y != null) args.push(`--cursor-offset-y=${options.cursorOffset.y}`);
+  if (!kiosk && options.cursorAnchor) args.push('--cursor-anchor', options.cursorAnchor);
+  if (!kiosk && options.followMode != null) args.push('--follow-mode', options.followMode);
 
   const spawnArgs = [...(host.extraArgs || []), ...args];
   const proc = spawn(host.path, spawnArgs, {

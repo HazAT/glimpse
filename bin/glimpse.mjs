@@ -17,6 +17,7 @@ for (let i = 0; i < args.length; i++) {
   else if (arg === '--floating') { flags.floating = true; }
   else if (arg === '--transparent') { flags.transparent = true; }
   else if (arg === '--click-through') { flags.clickThrough = true; }
+  else if (arg === '--kiosk') { flags.kiosk = true; }
   else if (arg === '--follow-cursor') { flags.followCursor = true; }
   else if (arg === '--auto-close') { flags.autoClose = true; }
   else if (arg === '--width' && args[i + 1]) { flags.width = parseInt(args[++i]); }
@@ -44,23 +45,24 @@ Usage:
   glimpseui --demo                   Show a demo window
 
 Options:
-  --width <n>          Window width (default: 800)
-  --height <n>         Window height (default: 600)
+  --width <n>          Window width (ignored with --kiosk)
+  --height <n>         Window height (ignored with --kiosk)
   --title <text>       Window title (default: "Glimpse")
   --frameless          No title bar
   --floating           Always on top
   --transparent        Transparent background
   --click-through      Mouse passes through
-  --follow-cursor      Window follows cursor
-  --follow-mode <mode> Follow mode: snap (default) or spring
-  --cursor-anchor <pos>  Snap point: top-left, top-right, right, bottom-right, bottom-left, left
-  --cursor-offset-x <n>  Cursor X offset (default: 20)
-  --cursor-offset-y <n>  Cursor Y offset (default: -20)
+  --kiosk              Request kiosk mode and inhibit system shortcuts
+  --follow-cursor      Window follows cursor (ignored with --kiosk)
+  --follow-mode <mode> Follow mode: snap (default) or spring (ignored with --kiosk)
+  --cursor-anchor <pos>  Snap point (ignored with --kiosk)
+  --cursor-offset-x <n>  Cursor X offset (ignored with --kiosk)
+  --cursor-offset-y <n>  Cursor Y offset (ignored with --kiosk)
   --open-links          Open http/https links in default browser
   --open-links-app <app> Open http/https links in a specific browser app (full path)
   --auto-close         Close after first window.glimpse.send()
-  --x <n>              Window X position
-  --y <n>              Window Y position
+  --x <n>              Window X position (ignored with --kiosk)
+  --y <n>              Window Y position (ignored with --kiosk)
   --demo               Show a demo window
   --help, -h           Show this help
 `);
@@ -125,8 +127,10 @@ async function main() {
     html = DEMO_HTML;
     flags.frameless = flags.frameless ?? true;
     flags.transparent = flags.transparent ?? true;
-    flags.width = flags.width ?? 380;
-    flags.height = flags.height ?? 320;
+    if (!flags.kiosk) {
+      flags.width = flags.width ?? 380;
+      flags.height = flags.height ?? 320;
+    }
   } else if (positional.length > 0) {
     // Load from file
     const file = resolve(positional[0]);

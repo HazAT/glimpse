@@ -38,6 +38,7 @@ function parseArgs() {
     floating: false,
     transparent: false,
     clickThrough: false,
+    kiosk: false,
     followCursor: false,
     followMode: 'snap',
     cursorAnchor: null,
@@ -64,6 +65,7 @@ function parseArgs() {
       case '--floating':    config.floating = true; break;
       case '--transparent': config.transparent = true; break;
       case '--click-through': config.clickThrough = true; break;
+      case '--kiosk': config.kiosk = true; break;
       case '--follow-cursor': config.followCursor = true; break;
       case '--follow-mode': config.followMode = args[++i] || 'snap'; break;
       case '--cursor-anchor': config.cursorAnchor = args[++i] || null; break;
@@ -568,6 +570,7 @@ async function main() {
   ];
 
   if (config.transparent) chromeArgs.push('--enable-transparent-visuals');
+  if (config.kiosk) chromeArgs.push('--kiosk');
 
   // Initial position
   if (config.followCursor) {
@@ -760,12 +763,26 @@ async function main() {
     xWindowId = findChromeWindow(cdp.pid, config.width, config.height);
     if (!xWindowId) {
       log('Could not find Chrome X11 window for mode application');
+      if (config.kiosk) {
+        emitEvent({
+          type: 'kiosk',
+          active: false,
+          reason: 'Chromium kiosk window requested, but OS-level shortcut inhibition is not available in this backend',
+        });
+      }
       return;
     }
 
     if (config.frameless) xSetFrameless(xWindowId);
-    if (config.floating || config.followCursor) xSetAbove(xWindowId);
+    if (config.floating || config.followCursor || config.kiosk) xSetAbove(xWindowId);
     if (config.clickThrough) xSetClickThrough(xWindowId);
+    if (config.kiosk) {
+      emitEvent({
+        type: 'kiosk',
+        active: false,
+        reason: 'Chromium kiosk window requested, but OS-level shortcut inhibition is not available in this backend',
+      });
+    }
 
     if (config.hidden) {
       xWindowMove(xWindowId, -10000, -10000);
@@ -1075,6 +1092,19 @@ async function main() {
             expression: `window.glimpse && (window.glimpse.cursorTip = null)`,
           }, sessionId);
         }
+        break;
+      }
+
+      case 'kiosk': {
+        config.kiosk = msg.enabled !== false;
+        if (xWindowId && config.kiosk) xSetAbove(xWindowId);
+        emitEvent({
+          type: 'kiosk',
+          active: false,
+          reason: config.kiosk
+            ? 'Chromium backend cannot inhibit OS-level shortcuts after launch'
+            : 'kiosk mode disabled',
+        });
         break;
       }
 

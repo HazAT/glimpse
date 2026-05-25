@@ -32,14 +32,31 @@ sealed class GlimpseHost : IDisposable
     private const int SwpNoSize = 0x1;
     private const int HwndTopmost = -1;
     private const int HwndNotopmost = -2;
+    private const int WhKeyboardLl = 13;
+    private const int WmKeydown = 0x0100;
+    private const int WmSysKeydown = 0x0104;
+    private const int LlkhfAltdown = 0x20;
+    private const int VkTab = 0x09;
+    private const int VkEscape = 0x1B;
+    private const int VkSpace = 0x20;
+    private const int VkShift = 0x10;
+    private const int VkControl = 0x11;
+    private const int VkMenu = 0x12;
+    private const int VkF4 = 0x73;
+    private const int VkLWin = 0x5B;
+    private const int VkRWin = 0x5C;
 
     private readonly Config _config;
     private readonly WebView2 _webView;
     private readonly System.Windows.Forms.Timer _cursorTimer;
+    private readonly LowLevelKeyboardProc _keyboardProc;
     private bool _closed;
     private bool _hidden;
     private bool _initialized;
     private bool _followCursorEnabled;
+    private bool _kioskRequested;
+    private bool _kioskActive;
+    private IntPtr _keyboardHook;
     private string? _cursorAnchor;
     private int _cursorOffsetX;
     private int _cursorOffsetY;
@@ -56,6 +73,7 @@ sealed class GlimpseHost : IDisposable
         _config = config;
         _hidden = config.Hidden;
         _followCursorEnabled = config.FollowCursor;
+        _kioskRequested = config.Kiosk;
         _cursorAnchor = config.CursorAnchor;
         _cursorOffsetX = config.CursorOffsetX;
         _cursorOffsetY = config.CursorOffsetY;
@@ -66,11 +84,11 @@ sealed class GlimpseHost : IDisposable
             Text = config.Title,
             StartPosition = FormStartPosition.Manual,
             ClientSize = new Size(config.Width, config.Height),
-            TopMost = config.Floating || config.FollowCursor,
+            TopMost = config.Floating || config.FollowCursor || config.Kiosk,
             ShowInTaskbar = false
         };
 
-        if (config.Frameless || config.Transparent)
+        if (config.Frameless || config.Transparent || config.Kiosk)
         {
             Form.FormBorderStyle = FormBorderStyle.None;
         }
@@ -82,7 +100,11 @@ sealed class GlimpseHost : IDisposable
             Form.TransparencyKey = Color.Magenta;
         }
 
-        if (config.X is not null && config.Y is not null)
+        if (config.Kiosk)
+        {
+            ApplyKioskWindowBounds();
+        }
+        else if (config.X is not null && config.Y is not null)
         {
             Form.Location = new Point(config.X.Value, config.Y.Value);
         }
@@ -111,12 +133,17 @@ sealed class GlimpseHost : IDisposable
             {
                 ActivateVisibleWindow();
             }
+            if (_kioskRequested)
+            {
+                SetKioskMode(true);
+            }
         };
         Form.FormClosing += (_, _) => CloseOnce();
         Form.HandleCreated += (_, _) => ApplyExtendedStyles();
 
         _cursorTimer = new System.Windows.Forms.Timer { Interval = 16 };
         _cursorTimer.Tick += (_, _) => UpdateFollowCursor();
+        _keyboardProc = KeyboardHookCallback;
 
         _ = Task.Run(ReadCommandsAsync);
     }
@@ -267,6 +294,10 @@ sealed class GlimpseHost : IDisposable
                     ActivateVisibleWindow();
                     _webView.Focus();
                 }
+                if (_kioskRequested)
+                {
+                    SetKioskMode(true);
+                }
                 break;
             case "close":
                 CloseOnce();
@@ -282,7 +313,7 @@ sealed class GlimpseHost : IDisposable
                     _followMode = modeNode.GetString() ?? "snap";
                     InitializeSpringState();
                 }
-                Form.TopMost = _followCursorEnabled || _config.Floating;
+                Form.TopMost = _kioskRequested || _followCursorEnabled || _config.Floating;
                 EnsureTopMost();
                 if (_followCursorEnabled)
                 {
@@ -295,6 +326,10 @@ sealed class GlimpseHost : IDisposable
                     _cursorTimer.Stop();
                     PushCursorTip();
                 }
+                break;
+            case "kiosk":
+                _kioskRequested = !json.TryGetProperty("enabled", out var kioskNode) || kioskNode.GetBoolean();
+                SetKioskMode(_kioskRequested);
                 break;
         }
     }
@@ -464,7 +499,7 @@ sealed class GlimpseHost : IDisposable
     private void EnsureTopMost()
     {
         if (!Form.IsHandleCreated) return;
-        var shouldBeTopMost = _followCursorEnabled || _config.Floating;
+        var shouldBeTopMost = _kioskRequested || _followCursorEnabled || _config.Floating;
         var hWndInsertAfter = shouldBeTopMost ? new IntPtr(HwndTopmost) : new IntPtr(HwndNotopmost);
         SetWindowPos(Form.Handle, hWndInsertAfter, 0, 0, 0, 0, SwpNoMove | SwpNoSize);
     }
@@ -482,11 +517,103 @@ sealed class GlimpseHost : IDisposable
         {
             style &= ~WsExTransparent;
         }
-        if (_config.Floating || _config.FollowCursor)
+        if (_config.Floating || _config.FollowCursor || _kioskRequested)
         {
             style |= WsExTopmost;
         }
         SetWindowLong(Form.Handle, GwlExStyle, style);
+    }
+
+    private void SetKioskMode(bool enabled, bool emit = true)
+    {
+        _kioskRequested = enabled;
+        if (enabled)
+        {
+            ApplyKioskWindowBounds();
+            Form.TopMost = true;
+            EnsureTopMost();
+            ActivateVisibleWindow();
+            _webView.Focus();
+            InstallKeyboardHook();
+            _kioskActive = _keyboardHook != IntPtr.Zero;
+            if (emit)
+            {
+                WriteJson(new
+                {
+                    type = "kiosk",
+                    active = _kioskActive,
+                    reason = _kioskActive
+                        ? "low-level keyboard hook enabled"
+                        : "failed to install low-level keyboard hook"
+                });
+            }
+        }
+        else
+        {
+            RemoveKeyboardHook();
+            _kioskActive = false;
+            Form.TopMost = _followCursorEnabled || _config.Floating;
+            EnsureTopMost();
+            if (emit)
+            {
+                WriteJson(new { type = "kiosk", active = false, reason = "kiosk mode disabled" });
+            }
+        }
+    }
+
+    private void ApplyKioskWindowBounds()
+    {
+        var screen = Screen.FromPoint(Cursor.Position);
+        Form.FormBorderStyle = FormBorderStyle.None;
+        Form.WindowState = FormWindowState.Normal;
+        Form.Bounds = screen.Bounds;
+    }
+
+    private void InstallKeyboardHook()
+    {
+        if (_keyboardHook != IntPtr.Zero) return;
+        _keyboardHook = SetWindowsHookEx(WhKeyboardLl, _keyboardProc, GetModuleHandle(null), 0);
+    }
+
+    private void RemoveKeyboardHook()
+    {
+        if (_keyboardHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_keyboardHook);
+        _keyboardHook = IntPtr.Zero;
+    }
+
+    private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && _kioskRequested && (wParam == new IntPtr(WmKeydown) || wParam == new IntPtr(WmSysKeydown)))
+        {
+            var data = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
+            if (ShouldBlockKioskKey(data))
+            {
+                return new IntPtr(1);
+            }
+        }
+
+        return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+    }
+
+    private static bool ShouldBlockKioskKey(KbdLlHookStruct data)
+    {
+        var vk = (int)data.VkCode;
+        var alt = (data.Flags & LlkhfAltdown) != 0 || IsKeyDown(VkMenu);
+        var ctrl = IsKeyDown(VkControl);
+        var shift = IsKeyDown(VkShift);
+
+        if (vk == VkLWin || vk == VkRWin) return true;
+        if (alt && (vk == VkTab || vk == VkEscape || vk == VkF4 || vk == VkSpace)) return true;
+        if (ctrl && vk == VkEscape) return true;
+        if (ctrl && shift && vk == VkEscape) return true;
+
+        return false;
+    }
+
+    private static bool IsKeyDown(int virtualKey)
+    {
+        return (GetAsyncKeyState(virtualKey) & unchecked((short)0x8000)) != 0;
     }
 
     private static object GetCursor()
@@ -585,6 +712,10 @@ sealed class GlimpseHost : IDisposable
     {
         if (_closed) return;
         _closed = true;
+        if (_kioskActive || _keyboardHook != IntPtr.Zero)
+        {
+            SetKioskMode(false, false);
+        }
         WriteJson(new { type = "closed" });
         Console.Out.Flush();
         _cursorTimer.Stop();
@@ -605,6 +736,7 @@ sealed class GlimpseHost : IDisposable
 
     public void Dispose()
     {
+        RemoveKeyboardHook();
         _cursorTimer.Dispose();
         _webView.Dispose();
         Form.Dispose();
@@ -630,6 +762,33 @@ sealed class GlimpseHost : IDisposable
 
     [DllImport("Shcore.dll")]
     private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KbdLlHookStruct
+    {
+        public uint VkCode;
+        public uint ScanCode;
+        public uint Flags;
+        public uint Time;
+        public IntPtr DwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
 }
 
 sealed class Config
@@ -641,6 +800,7 @@ sealed class Config
     public bool Floating { get; init; }
     public bool Transparent { get; init; }
     public bool ClickThrough { get; init; }
+    public bool Kiosk { get; init; }
     public bool FollowCursor { get; init; }
     public bool Hidden { get; init; }
     public bool AutoClose { get; init; }
@@ -665,6 +825,7 @@ sealed class Config
                 case "--floating":
                 case "--transparent":
                 case "--click-through":
+                case "--kiosk":
                 case "--follow-cursor":
                 case "--hidden":
                 case "--auto-close":
@@ -696,6 +857,7 @@ sealed class Config
             Floating = flags.Contains("--floating"),
             Transparent = flags.Contains("--transparent"),
             ClickThrough = flags.Contains("--click-through"),
+            Kiosk = flags.Contains("--kiosk"),
             FollowCursor = flags.Contains("--follow-cursor"),
             Hidden = flags.Contains("--hidden"),
             AutoClose = flags.Contains("--auto-close"),

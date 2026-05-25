@@ -18,12 +18,19 @@ func log(_ message: String) {
 
 // MARK: - System Info
 
+func screenContainingMouse() -> NSScreen? {
+    let mouse = NSEvent.mouseLocation
+    return NSScreen.screens.first { screen in
+        screen.frame.contains(mouse)
+    } ?? NSScreen.main
+}
+
 func getSystemInfo() -> [String: Any] {
     let mouse = NSEvent.mouseLocation
 
-    // Main screen
+    // Active screen
     var screenInfo: [String: Any] = [:]
-    if let screen = NSScreen.main {
+    if let screen = screenContainingMouse() {
         let f = screen.frame
         let v = screen.visibleFrame
         screenInfo = [
@@ -139,6 +146,7 @@ struct Config {
     var openLinksApp: String? = nil
     var statusItem: Bool = false
     var noDock: Bool = false
+    var kiosk: Bool = false
 }
 
 func parseArgs() -> Config {
@@ -178,6 +186,8 @@ func parseArgs() -> Config {
             if i < args.count, let v = Int(args[i]) { config.cursorOffsetY = v }
         case "--click-through":
             config.clickThrough = true
+        case "--kiosk":
+            config.kiosk = true
         case "--hidden":
             config.hidden = true
         case "--auto-close":
@@ -367,6 +377,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     var popover: NSPopover?
     var popoverViewController: StatusItemViewController?
 
+    // Kiosk mode state — AppKit presentation options must be restored on exit.
+    var previousPresentationOptions: NSApplication.PresentationOptions?
+    var previousActivationPolicy: NSApplication.ActivationPolicy?
+    var kioskRequested: Bool = false
+    var kioskActive: Bool = false
+
     nonisolated init(config: Config) {
         self.config = config
     }
@@ -379,8 +395,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             hidden = config.hidden
             cursorAnchor = config.cursorAnchor
             followMode = config.followMode
+            kioskRequested = config.kiosk
             setupWindow()
             setupWebView()
+            if kioskRequested && !hidden {
+                setKioskMode(true)
+            }
             if config.followCursor {
                 if followMode == "spring" {
                     // Initialize spring position from the window position set by setupWindow()
@@ -432,8 +452,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     private func setupWindow() {
-        let rect = NSRect(x: 0, y: 0, width: config.width, height: config.height)
-        let styleMask: NSWindow.StyleMask = config.frameless
+        let rect = config.kiosk
+            ? (screenContainingMouse()?.frame ?? NSRect(x: 0, y: 0, width: config.width, height: config.height))
+            : NSRect(x: 0, y: 0, width: config.width, height: config.height)
+        let styleMask: NSWindow.StyleMask = (config.frameless || config.kiosk)
             ? [.borderless]
             : [.titled, .closable, .miniaturizable, .resizable]
         window = GlimpsePanel(
@@ -443,10 +465,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             defer: false
         )
         window.title = config.title
-        if config.frameless {
+        if config.frameless && !config.kiosk {
             window.isMovableByWindowBackground = true
         }
-        if config.floating || config.followCursor {
+        if config.kiosk {
+            window.level = .screenSaver
+            window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary, .stationary])
+        } else if config.floating || config.followCursor {
             window.level = .floating
         }
         if config.clickThrough {
@@ -456,7 +481,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             window.isOpaque = false
             window.backgroundColor = .clear
         }
-        if config.followCursor {
+        if config.kiosk {
+            window.setFrame(rect, display: false)
+        } else if config.followCursor {
             let mouse = NSEvent.mouseLocation
             if let anchor = cursorAnchor,
                let base = anchorPosition(mouse: mouse, windowSize: NSSize(width: config.width, height: config.height), anchor: anchor) {
@@ -677,6 +704,92 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         }
     }
 
+    // MARK: - Kiosk Mode
+
+    func baseActivationPolicy() -> NSApplication.ActivationPolicy {
+        return (config.statusItem || config.clickThrough || config.hidden || config.noDock) ? .accessory : .regular
+    }
+
+    func applyKioskWindowFrame() {
+        guard let screen = screenContainingMouse() else { return }
+        window.styleMask = [.borderless]
+        window.setFrame(screen.frame, display: true)
+    }
+
+    func setKioskMode(_ enabled: Bool, emit: Bool = true) {
+        kioskRequested = enabled
+        guard !config.statusItem else {
+            if emit {
+                writeToStdout([
+                    "type": "kiosk",
+                    "active": false,
+                    "reason": "kiosk mode is not supported in status-item mode",
+                ])
+            }
+            return
+        }
+
+        if enabled {
+            if previousPresentationOptions == nil {
+                previousPresentationOptions = NSApp.presentationOptions
+            }
+            if previousActivationPolicy == nil {
+                previousActivationPolicy = baseActivationPolicy()
+            }
+
+            NSApp.setActivationPolicy(.regular)
+
+            var options = NSApp.presentationOptions
+            options.formUnion([
+                .hideDock,
+                .hideMenuBar,
+                .disableProcessSwitching,
+                .disableForceQuit,
+                .disableSessionTermination,
+                .disableHideApplication,
+            ])
+            NSApp.presentationOptions = options
+
+            applyKioskWindowFrame()
+            window.level = .screenSaver
+            window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary, .stationary])
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(webView)
+            NSApp.activate(ignoringOtherApps: true)
+            kioskActive = true
+
+            if emit {
+                writeToStdout([
+                    "type": "kiosk",
+                    "active": true,
+                    "reason": "AppKit presentation options enabled",
+                ])
+            }
+        } else {
+            if let previousPresentationOptions {
+                NSApp.presentationOptions = previousPresentationOptions
+                self.previousPresentationOptions = nil
+            }
+            if let previousActivationPolicy {
+                NSApp.setActivationPolicy(previousActivationPolicy)
+                self.previousActivationPolicy = nil
+            }
+
+            kioskActive = false
+            if !config.floating && !config.followCursor {
+                window.level = .normal
+            }
+
+            if emit {
+                writeToStdout([
+                    "type": "kiosk",
+                    "active": false,
+                    "reason": "kiosk mode disabled",
+                ])
+            }
+        }
+    }
+
     // MARK: - Stdin Reader
 
     private func startStdinReader() {
@@ -774,6 +887,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             } else {
                 webView.evaluateJavaScript("window.glimpse.cursorTip = null", completionHandler: nil)
             }
+        case "kiosk":
+            if hidden && (json["enabled"] as? Bool ?? true) {
+                kioskRequested = true
+                writeToStdout([
+                    "type": "kiosk",
+                    "active": false,
+                    "reason": "kiosk mode deferred until window is shown",
+                ])
+                return
+            }
+            setKioskMode(json["enabled"] as? Bool ?? true)
         case "file":
             guard let path = json["path"] as? String else {
                 log("file command: missing path field")
@@ -811,6 +935,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                 window.makeKeyAndOrderFront(nil)
                 window.makeFirstResponder(webView)
                 NSApp.activate(ignoringOtherApps: true)
+                if kioskRequested || kioskActive {
+                    setKioskMode(true)
+                }
             }
         case "title":
             guard let title = json["title"] as? String else {
@@ -840,6 +967,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     func closeAndExit() {
+        if kioskActive {
+            setKioskMode(false, emit: false)
+        }
         if config.statusItem, let item = nsStatusItem {
             NSStatusBar.system.removeStatusItem(item)
             nsStatusItem = nil
@@ -929,6 +1059,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     func windowWillClose(_ notification: Notification) {
+        if kioskActive {
+            setKioskMode(false, emit: false)
+        }
         writeToStdout(["type": "closed"])
         exit(0)
     }
@@ -940,5 +1073,5 @@ let config = parseArgs()
 let app = NSApplication.shared
 let delegate = AppDelegate(config: config)
 app.delegate = delegate
-app.setActivationPolicy((config.statusItem || config.clickThrough || config.hidden || config.noDock) ? .accessory : .regular)
+app.setActivationPolicy((config.statusItem || (!config.kiosk && (config.clickThrough || config.hidden || config.noDock))) ? .accessory : .regular)
 app.run()

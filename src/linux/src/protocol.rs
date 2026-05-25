@@ -5,12 +5,24 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum InboundMsg {
-    Html { html: String },
-    Eval { js: String },
-    File { path: String },
-    Show { title: Option<String> },
+    Html {
+        html: String,
+    },
+    Eval {
+        js: String,
+    },
+    File {
+        path: String,
+    },
+    Show {
+        title: Option<String>,
+    },
     Close,
     GetInfo,
+    Kiosk {
+        #[serde(default = "default_true")]
+        enabled: bool,
+    },
     FollowCursor {
         #[serde(default = "default_true")]
         enabled: bool,
@@ -38,6 +50,11 @@ pub enum OutboundMsg {
     },
     Message {
         data: serde_json::Value,
+    },
+    Kiosk {
+        active: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     Closed,
 }

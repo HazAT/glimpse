@@ -69,6 +69,7 @@ Glimpse supports several window style flags that can be combined freely:
 | `floating` | Always on top of other windows |
 | `transparent` | Clear window background — HTML body needs `background: transparent` |
 | `clickThrough` | Window ignores all mouse events |
+| `kiosk` | Open borderless on the active display and request shortcut inhibition while the window is open |
 | `noDock` | No dock icon (macOS) — window works normally but the app doesn't appear in the dock or app switcher |
 
 Common combinations:
@@ -77,6 +78,25 @@ Common combinations:
 - **Custom dialog**: `frameless: true` — clean UI with no system chrome
 - **Overlay**: `frameless + transparent` — shaped widgets that float over content
 - **Companion widget**: `frameless + transparent + floating + clickThrough` — visual-only overlays that don't interfere with the desktop
+- **Kiosk prompt**: `kiosk: true` — fill the active display, keep focus, and ask the OS to route common system shortcuts to the window
+
+## Kiosk Mode
+
+`kiosk: true` opens a borderless window on the active display, sizes it to that display, focuses the WebView for normal typing, and asks the operating system or compositor to inhibit common window-switching shortcuts while the window is open.
+
+```js
+const win = open('<input autofocus placeholder="Stay here" />', {
+  kiosk: true
+});
+
+win.on('kiosk', ({ active, reason }) => {
+  console.log(active, reason);
+});
+```
+
+Kiosk mode is explicit and best-effort. `active: true` means the backend installed its shortcut-control mechanism; `active: false` means kiosk was disabled, deferred, or unavailable in that backend. macOS uses the screen containing the pointer plus AppKit presentation options. Linux native uses the pointer's monitor, an active keyboard grab on X11, and layer-shell keyboard exclusivity plus GDK shortcut inhibition on Wayland where the compositor supports it. Windows uses the screen containing the pointer plus a low-level keyboard hook for common switch-away shortcuts. The Linux Chromium fallback passes Chromium's `--kiosk` flag and may open fullscreen, but cannot reliably inhibit OS-level shortcuts and reports `active: false`.
+
+When `kiosk` is set, Glimpse treats it as a screen-owning mode. The Node wrapper ignores `width`, `height`, `x`, `y`, `followCursor`, `followMode`, `cursorAnchor`, and `cursorOffset`, and emits a `GLIMPSE_KIOSK_IGNORED_OPTIONS` warning if any are provided.
 
 ## Follow Cursor
 
@@ -106,7 +126,7 @@ const win = open(`
 
 The window tracks the cursor in real-time across all screens. `followCursor` implies `floating` — the window stays on top automatically.
 
-**Platform support:** Follow cursor works on macOS and Windows. On Linux with the native backend, it requires Hyprland (via IPC socket). The Chromium CDP backend also supports X11 (via `xdotool`). Other Wayland compositors without the Chromium backend will emit a warning and silently ignore `followCursor`.
+**Platform support:** Follow cursor works on macOS and Windows. On Linux with the native backend, it requires Hyprland (via IPC socket). Runtime `win.followCursor(true)` on Linux native also requires the window to have been launched with a layer-shell mode such as `followCursor`, `floating`, `clickThrough`, `kiosk`, or an explicit position. The Chromium CDP backend also supports X11 (via `xdotool`). Other Wayland compositors without the Chromium backend will emit a warning and silently ignore `followCursor`.
 
 You can also toggle tracking dynamically after the window is open:
 
@@ -186,19 +206,20 @@ const win = open('<html>...</html>', {
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `width` | number | `800` | Window width in pixels |
-| `height` | number | `600` | Window height in pixels |
+| `width` | number | `800` | Window width in pixels (ignored with `kiosk`) |
+| `height` | number | `600` | Window height in pixels (ignored with `kiosk`) |
 | `title` | string | `"Glimpse"` | Title bar text (ignored when frameless) |
-| `x` | number | — | Horizontal screen position (omit to center) |
-| `y` | number | — | Vertical screen position (omit to center) |
+| `x` | number | — | Horizontal screen position (omit to center; ignored with `kiosk`) |
+| `y` | number | — | Vertical screen position (omit to center; ignored with `kiosk`) |
 | `frameless` | boolean | `false` | Remove the title bar |
 | `floating` | boolean | `false` | Always on top of other windows |
 | `transparent` | boolean | `false` | Transparent window background |
 | `clickThrough` | boolean | `false` | Window ignores all mouse events |
-| `followCursor` | boolean | `false` | Track cursor position in real-time |
-| `followMode` | string | `"snap"` | Follow animation: `snap` (instant) or `spring` (elastic with overshoot) |
-| `cursorAnchor` | string | — | Snap point around cursor: `top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left` |
-| `cursorOffset` | `{ x?, y? }` | `{ x: 20, y: -20 }` | Pixel offset from cursor (or fine-tuning on top of `cursorAnchor`) |
+| `kiosk` | boolean | `false` | Fill the active display and request system shortcut inhibition |
+| `followCursor` | boolean | `false` | Track cursor position in real-time (ignored with `kiosk`) |
+| `followMode` | string | `"snap"` | Follow animation: `snap` (instant) or `spring` (elastic with overshoot; ignored with `kiosk`) |
+| `cursorAnchor` | string | — | Snap point around cursor: `top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left` (ignored with `kiosk`) |
+| `cursorOffset` | `{ x?, y? }` | `{ x: 20, y: -20 }` | Pixel offset from cursor (or fine-tuning on top of `cursorAnchor`; ignored with `kiosk`) |
 | `openLinks` | boolean | `false` | Open clicked `http`/`https` links in the system browser (macOS only) |
 | `openLinksApp` | string | — | App bundle path for opening links, e.g. `"/Applications/Firefox.app"` (macOS only) |
 | `hidden` | boolean | `false` | Start hidden (prewarm mode) — load HTML in the background, reveal with `win.show()` |
@@ -285,6 +306,7 @@ if (supportsFollowCursor()) {
 | `ready` | `info: object` | WebView loaded — includes screen, appearance, and cursor info |
 | `message` | `data: object` | Message sent from the page via `window.glimpse.send(data)` |
 | `info` | `info: object` | Fresh system info (response to `.getInfo()`) |
+| `kiosk` | `{ active, reason }` | Kiosk shortcut-control state changed or was reported |
 | `click` | — | Menu bar icon clicked (status item mode only) |
 | `closed` | — | Window was closed (by user or via `.close()`) |
 | `error` | `Error` | Process error or malformed protocol line |
@@ -319,6 +341,12 @@ win.followCursor(true);                        // attach to cursor
 win.followCursor(true, 'top-right');           // attach at snap point
 win.followCursor(true, 'top-right', 'spring'); // spring physics
 win.followCursor(false);                       // detach
+```
+
+**`win.kiosk(enabled?)`** — Enable or disable kiosk shortcut control at runtime. Enabling also applies kiosk geometry where supported; disabling releases shortcut control, but backends may leave the window's current size/style in place.
+```js
+win.kiosk(true);
+win.kiosk(false);
 ```
 
 **`win.info`** — Getter for the last-known system info. Available after `ready`.
@@ -378,6 +406,12 @@ Glimpse uses a newline-delimited JSON (JSON Lines) protocol over stdin/stdout. E
 {"type":"follow-cursor","enabled":false}
 ```
 
+**Kiosk** — Toggle kiosk shortcut control.
+```json
+{"type":"kiosk","enabled":true}
+{"type":"kiosk","enabled":false}
+```
+
 **Load File** — Load a local HTML file by absolute path.
 ```json
 {"type":"file","path":"/path/to/page.html"}
@@ -431,6 +465,11 @@ Glimpse uses a newline-delimited JSON (JSON Lines) protocol over stdin/stdout. E
 {"type":"click"}
 ```
 
+**Kiosk** — Kiosk shortcut-control state or backend support changed.
+```json
+{"type":"kiosk","active":true,"reason":"system shortcut inhibition granted"}
+```
+
 **Closed** — Window closed.
 ```json
 {"type":"closed"}
@@ -459,20 +498,21 @@ npx glimpseui page.html --frameless --transparent
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--width N` | `800` | Window width in pixels |
-| `--height N` | `600` | Window height in pixels |
+| `--width N` | `800` | Window width in pixels (ignored with `--kiosk`) |
+| `--height N` | `600` | Window height in pixels (ignored with `--kiosk`) |
 | `--title STR` | `"Glimpse"` | Window title bar text |
-| `--x N` | — | Horizontal screen position |
-| `--y N` | — | Vertical screen position |
+| `--x N` | — | Horizontal screen position (ignored with `--kiosk`) |
+| `--y N` | — | Vertical screen position (ignored with `--kiosk`) |
 | `--frameless` | off | Remove the title bar |
 | `--floating` | off | Always on top |
 | `--transparent` | off | Transparent background |
 | `--click-through` | off | Mouse passes through |
-| `--follow-cursor` | off | Track cursor position |
-| `--follow-mode MODE` | `snap` | `snap` (instant) or `spring` (elastic) |
-| `--cursor-anchor POS` | — | Snap point: `top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left` |
-| `--cursor-offset-x N` | `20` | Horizontal cursor offset |
-| `--cursor-offset-y N` | `-20` | Vertical cursor offset |
+| `--kiosk` | off | Fill the active display and request shortcut inhibition |
+| `--follow-cursor` | off | Track cursor position (ignored with `--kiosk`) |
+| `--follow-mode MODE` | `snap` | `snap` (instant) or `spring` (elastic; ignored with `--kiosk`) |
+| `--cursor-anchor POS` | — | Snap point: `top-left`, `top-right`, `right`, `bottom-right`, `bottom-left`, `left` (ignored with `--kiosk`) |
+| `--cursor-offset-x N` | `20` | Horizontal cursor offset (ignored with `--kiosk`) |
+| `--cursor-offset-y N` | `-20` | Vertical cursor offset (ignored with `--kiosk`) |
 | `--open-links` | off | Open `http`/`https` links in system browser (macOS) |
 | `--open-links-app PATH` | — | Open links in a specific app (macOS) |
 | `--status-item` | off | Menu bar mode instead of window (macOS) |
@@ -572,6 +612,7 @@ The core protocol and Node.js API are identical across platforms. Some features 
 | Window modes (frameless, floating, transparent, click-through) | ✅ | ✅ | ✅ | ✅ |
 | Follow cursor | ✅ | Hyprland only | Hyprland + X11 | ✅ |
 | Spring physics (follow mode) | ✅ | ✅ (Hyprland) | ✅ | ✅ |
+| Kiosk shortcut inhibition | ✅ | X11 grab; Wayland compositor-dependent | — | Best effort |
 | Status item (menu bar / tray) | ✅ | — | ✅ | — |
 | Open links externally | ✅ | — | ✅ | — |
 | Hidden / prewarm | ✅ | ✅ | ✅ | ✅ |

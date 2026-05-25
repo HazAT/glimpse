@@ -4,6 +4,7 @@ mod hyprland;
 mod io;
 mod protocol;
 mod sysinfo;
+mod x11;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,9 +14,12 @@ use std::time::Duration;
 
 use base64::Engine;
 use clap::Parser;
-use glib::prelude::*;
+use gdk4::prelude::*;
 use gtk4::prelude::*;
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use gtk4_layer_shell::{
+    is_supported as layer_shell_is_supported, protocol_version as layer_shell_protocol_version,
+    Edge, KeyboardMode, Layer, LayerShell,
+};
 use webkit6::prelude::*;
 
 use protocol::{InboundMsg, OutboundMsg};
@@ -41,6 +45,8 @@ struct Args {
     transparent: bool,
     #[arg(long = "click-through")]
     click_through: bool,
+    #[arg(long)]
+    kiosk: bool,
     #[arg(long = "follow-cursor")]
     follow_cursor: bool,
     #[arg(long = "follow-mode", default_value = "snap")]
@@ -60,11 +66,28 @@ struct Args {
 impl Args {
     fn effective_offset_x(&self) -> f64 {
         self.cursor_offset_x
-            .unwrap_or(if self.cursor_anchor.is_some() { 0.0 } else { 20.0 })
+            .unwrap_or(if self.cursor_anchor.is_some() {
+                0.0
+            } else {
+                20.0
+            })
     }
     fn effective_offset_y(&self) -> f64 {
         self.cursor_offset_y
-            .unwrap_or(if self.cursor_anchor.is_some() { 0.0 } else { -20.0 })
+            .unwrap_or(if self.cursor_anchor.is_some() {
+                0.0
+            } else {
+                -20.0
+            })
+    }
+
+    fn needs_layer_shell(&self) -> bool {
+        self.floating
+            || self.follow_cursor
+            || self.click_through
+            || self.kiosk
+            || self.x.is_some()
+            || self.y.is_some()
     }
 }
 
@@ -111,27 +134,51 @@ fn main() {
 
 fn activate(app: &gtk4::Application, args: &Rc<Args>) {
     let display = gdk4::Display::default().unwrap();
+    let layer_shell_enabled =
+        display.backend().is_wayland() && args.needs_layer_shell() && layer_shell_is_supported();
+    let kiosk_monitor = if args.kiosk {
+        active_monitor(&display)
+    } else {
+        None
+    };
+    let kiosk_bounds = kiosk_monitor.as_ref().map(|monitor| monitor.geometry());
+    let initial_width = kiosk_bounds
+        .as_ref()
+        .map(|geom| geom.width())
+        .unwrap_or(args.width);
+    let initial_height = kiosk_bounds
+        .as_ref()
+        .map(|geom| geom.height())
+        .unwrap_or(args.height);
 
     let window = gtk4::ApplicationWindow::new(app);
-    window.init_layer_shell();
-    window.set_layer(Layer::Overlay);
-    window.set_exclusive_zone(-1);
+    if layer_shell_enabled {
+        window.init_layer_shell();
+        window.set_layer(Layer::Overlay);
+        window.set_exclusive_zone(-1);
+        window.set_anchor(Edge::Top, true);
+        window.set_anchor(Edge::Left, true);
+        if args.kiosk {
+            window.set_anchor(Edge::Right, true);
+            window.set_anchor(Edge::Bottom, true);
+        }
+    }
     window.set_title(Some(&args.title));
-    window.set_default_size(args.width, args.height);
-
-    if args.click_through {
-        window.set_keyboard_mode(KeyboardMode::None);
-    } else {
-        window.set_keyboard_mode(KeyboardMode::OnDemand);
+    window.set_default_size(initial_width, initial_height);
+    if args.frameless || args.kiosk {
+        window.set_decorated(false);
     }
 
-    window.set_anchor(Edge::Top, true);
-    window.set_anchor(Edge::Left, true);
+    if layer_shell_enabled {
+        set_layer_keyboard_mode(&window, args, args.kiosk);
+    }
 
     let offset_x = args.effective_offset_x();
     let offset_y = args.effective_offset_y();
-    let initial_cursor = hyprland::current_cursor_pos().ok();
-    let (init_x, init_y) = if args.follow_cursor {
+    let initial_cursor = current_cursor_position(&display);
+    let (init_x, init_y) = if let Some(bounds) = kiosk_bounds.as_ref() {
+        (bounds.x(), bounds.y())
+    } else if args.follow_cursor {
         if let Some(cursor_pos) = initial_cursor {
             let (x, y) = cursor::compute_target(
                 cursor_pos.x as f64,
@@ -149,7 +196,11 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
     } else {
         resolve_initial_position(args, &display)
     };
-    place_window_at_global_position(&window, &display, (init_x as f64, init_y as f64));
+    if layer_shell_enabled && args.kiosk {
+        apply_kiosk_window_mode(&window, &display, layer_shell_enabled);
+    } else if layer_shell_enabled {
+        place_window_at_global_position(&window, &display, (init_x as f64, init_y as f64));
+    }
 
     if args.transparent {
         let provider = gtk4::CssProvider::new();
@@ -187,24 +238,21 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
     let auto_close = args.auto_close;
     let app_for_msg = app.clone();
     manager.register_script_message_handler("glimpse", None);
-    manager.connect_script_message_received(
-        Some("glimpse"),
-        move |_manager, value| {
-            let json_str = value.to_str();
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                if parsed.get("__glimpse_close").and_then(|v| v.as_bool()) == Some(true) {
-                    io::emit(&OutboundMsg::Closed);
-                    app_for_msg.quit();
-                    return;
-                }
-                io::emit(&OutboundMsg::Message { data: parsed });
-                if auto_close {
-                    io::emit(&OutboundMsg::Closed);
-                    app_for_msg.quit();
-                }
+    manager.connect_script_message_received(Some("glimpse"), move |_manager, value| {
+        let json_str = value.to_str();
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if parsed.get("__glimpse_close").and_then(|v| v.as_bool()) == Some(true) {
+                io::emit(&OutboundMsg::Closed);
+                app_for_msg.quit();
+                return;
             }
-        },
-    );
+            io::emit(&OutboundMsg::Message { data: parsed });
+            if auto_close {
+                io::emit(&OutboundMsg::Closed);
+                app_for_msg.quit();
+            }
+        }
+    });
 
     // ── Ready event on page load ────────────────────────────────────────
     let display_for_ready = display.clone();
@@ -214,6 +262,8 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
     let cursor_anchor = Rc::new(RefCell::new(args.cursor_anchor.clone()));
     let follow_mode = Rc::new(RefCell::new(args.follow_mode.clone()));
     let follow_enabled = Arc::new(AtomicBool::new(args.follow_cursor));
+    let kiosk_enabled = Rc::new(RefCell::new(args.kiosk));
+    let kiosk_signal_installed = Rc::new(RefCell::new(false));
     let current_cursor = Rc::new(RefCell::new(initial_cursor));
     let current_cursor_tip = Rc::new(RefCell::new(compute_cursor_tip_state(
         args,
@@ -248,7 +298,7 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
     ))));
     let spring_animating = Rc::new(RefCell::new(false));
 
-    if linux_follow_cursor_supported() {
+    if layer_shell_enabled && linux_follow_cursor_supported() {
         setup_cursor_tracking(
             &window,
             &display,
@@ -274,6 +324,8 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
     let cursor_anchor_for_stdin = cursor_anchor.clone();
     let follow_mode_for_stdin = follow_mode.clone();
     let follow_enabled_for_stdin = follow_enabled.clone();
+    let kiosk_enabled_for_stdin = kiosk_enabled.clone();
+    let kiosk_signal_installed_for_stdin = kiosk_signal_installed.clone();
     let current_cursor_for_stdin = current_cursor.clone();
     let current_cursor_tip_for_stdin = current_cursor_tip.clone();
     let spring_for_stdin = spring.clone();
@@ -293,6 +345,9 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
                 &cursor_anchor_for_stdin,
                 &follow_mode_for_stdin,
                 &follow_enabled_for_stdin,
+                &kiosk_enabled_for_stdin,
+                &kiosk_signal_installed_for_stdin,
+                layer_shell_enabled,
                 &current_cursor_for_stdin,
                 &current_cursor_tip_for_stdin,
                 offset_x,
@@ -306,6 +361,219 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
 
     if !args.hidden {
         window.present();
+        if args.kiosk {
+            apply_kiosk_window_mode(&window, &display, layer_shell_enabled);
+            webview.grab_focus();
+            set_kiosk_mode(
+                &window,
+                args,
+                true,
+                layer_shell_enabled,
+                &kiosk_enabled,
+                &kiosk_signal_installed,
+                true,
+            );
+        } else {
+            x11::set_keep_above(&window, args.floating);
+        }
+    }
+}
+
+fn current_cursor_position(display: &gdk4::Display) -> Option<protocol::CursorPos> {
+    if display.backend().is_x11() {
+        return x11::cursor_position(display);
+    }
+
+    hyprland::current_cursor_pos().ok()
+}
+
+fn active_monitor(display: &gdk4::Display) -> Option<gdk4::Monitor> {
+    current_cursor_position(display)
+        .and_then(|cursor| monitor_at_global_position(display, cursor.x, cursor.y))
+        .or_else(|| first_monitor(display))
+}
+
+fn apply_kiosk_window_mode(
+    window: &gtk4::ApplicationWindow,
+    display: &gdk4::Display,
+    layer_shell_enabled: bool,
+) {
+    window.set_decorated(false);
+
+    let Some(monitor) = active_monitor(display) else {
+        window.fullscreen();
+        return;
+    };
+
+    let geom = monitor.geometry();
+    window.set_default_size(geom.width(), geom.height());
+
+    if layer_shell_enabled {
+        window.set_monitor(Some(&monitor));
+        window.set_anchor(Edge::Top, true);
+        window.set_anchor(Edge::Left, true);
+        window.set_anchor(Edge::Right, true);
+        window.set_anchor(Edge::Bottom, true);
+        window.set_margin(Edge::Top, 0);
+        window.set_margin(Edge::Left, 0);
+        window.set_margin(Edge::Right, 0);
+        window.set_margin(Edge::Bottom, 0);
+    } else {
+        window.fullscreen_on_monitor(&monitor);
+    }
+}
+
+fn set_layer_keyboard_mode(window: &gtk4::ApplicationWindow, args: &Args, kiosk_enabled: bool) {
+    let mode = if kiosk_enabled && layer_shell_exclusive_keyboard_supported() {
+        KeyboardMode::Exclusive
+    } else if args.click_through {
+        KeyboardMode::None
+    } else {
+        KeyboardMode::OnDemand
+    };
+    window.set_keyboard_mode(mode);
+}
+
+fn layer_shell_exclusive_keyboard_supported() -> bool {
+    layer_shell_protocol_version() >= 4
+}
+
+fn toplevel_for_window(window: &gtk4::ApplicationWindow) -> Option<gdk4::Toplevel> {
+    window.surface().and_downcast::<gdk4::Toplevel>()
+}
+
+fn install_kiosk_status_signal(
+    window: &gtk4::ApplicationWindow,
+    kiosk_enabled: &Rc<RefCell<bool>>,
+    signal_installed: &Rc<RefCell<bool>>,
+    layer_shell_keyboard_active: bool,
+) {
+    if *signal_installed.borrow() {
+        return;
+    }
+
+    let Some(toplevel) = toplevel_for_window(window) else {
+        return;
+    };
+
+    *signal_installed.borrow_mut() = true;
+    let kiosk_enabled = kiosk_enabled.clone();
+    toplevel.connect_shortcuts_inhibited_notify(move |toplevel| {
+        if !*kiosk_enabled.borrow() {
+            return;
+        }
+
+        let gdk_active = toplevel.is_shortcuts_inhibited();
+        let active = gdk_active || layer_shell_keyboard_active;
+        let reason = if gdk_active {
+            "system shortcut inhibition granted"
+        } else if layer_shell_keyboard_active {
+            "layer-shell exclusive keyboard active; GDK shortcut status unavailable"
+        } else {
+            "system shortcut inhibition revoked by compositor"
+        };
+        io::emit(&OutboundMsg::Kiosk {
+            active,
+            reason: Some(reason.to_string()),
+        });
+    });
+}
+
+fn set_kiosk_mode(
+    window: &gtk4::ApplicationWindow,
+    args: &Args,
+    enabled: bool,
+    layer_shell_enabled: bool,
+    kiosk_enabled: &Rc<RefCell<bool>>,
+    kiosk_signal_installed: &Rc<RefCell<bool>>,
+    emit: bool,
+) {
+    *kiosk_enabled.borrow_mut() = enabled;
+
+    let layer_shell_keyboard_active =
+        enabled && layer_shell_enabled && layer_shell_exclusive_keyboard_supported();
+
+    if layer_shell_enabled {
+        set_layer_keyboard_mode(window, args, enabled);
+    }
+
+    if enabled {
+        let display = gtk4::prelude::WidgetExt::display(window);
+        apply_kiosk_window_mode(window, &display, layer_shell_enabled);
+    }
+
+    if x11::is_window(window) {
+        if enabled {
+            window.present();
+            x11::set_keep_above(window, true);
+        }
+
+        let result = x11::set_keyboard_grab(window, enabled);
+        let (active, reason) = match result {
+            Some(Ok(())) if enabled => (true, Some("X11 active keyboard grab enabled".to_string())),
+            Some(Ok(())) => (false, Some("kiosk mode disabled".to_string())),
+            Some(Err(reason)) => (false, Some(reason)),
+            None if enabled => (false, Some("X11 display unavailable".to_string())),
+            None => (false, Some("kiosk mode disabled".to_string())),
+        };
+
+        if !enabled {
+            x11::set_keep_above(window, args.floating || args.follow_cursor);
+        }
+
+        if emit {
+            io::emit(&OutboundMsg::Kiosk { active, reason });
+        }
+        return;
+    }
+
+    install_kiosk_status_signal(
+        window,
+        kiosk_enabled,
+        kiosk_signal_installed,
+        layer_shell_keyboard_active,
+    );
+
+    let mut active = enabled;
+    let mut reason = if enabled {
+        Some("kiosk mode requested".to_string())
+    } else {
+        Some("kiosk mode disabled".to_string())
+    };
+
+    if let Some(toplevel) = toplevel_for_window(window) {
+        if enabled {
+            toplevel.inhibit_system_shortcuts(None::<&gdk4::Event>);
+            active = toplevel.is_shortcuts_inhibited();
+            if active {
+                reason = Some("system shortcut inhibition granted".to_string());
+            } else if layer_shell_keyboard_active {
+                active = true;
+                reason = Some(
+                    "layer-shell exclusive keyboard active; GDK shortcut status pending"
+                        .to_string(),
+                );
+            } else {
+                reason = Some(
+                    "system shortcut inhibition requested; waiting for compositor".to_string(),
+                );
+            }
+        } else {
+            toplevel.restore_system_shortcuts();
+            active = false;
+        }
+    } else if enabled && layer_shell_enabled {
+        reason = Some(
+            "layer-shell exclusive keyboard requested; compositor shortcut status unavailable"
+                .to_string(),
+        );
+    } else if enabled {
+        active = false;
+        reason = Some("kiosk mode requires a realized window surface".to_string());
+    }
+
+    if emit {
+        io::emit(&OutboundMsg::Kiosk { active, reason });
     }
 }
 
@@ -377,8 +645,8 @@ fn place_window_at_global_position(
     let global_x = global_pos.0.round() as i32;
     let global_y = global_pos.1.round() as i32;
 
-    if let Some(monitor) = monitor_at_global_position(display, global_x, global_y)
-        .or_else(|| first_monitor(display))
+    if let Some(monitor) =
+        monitor_at_global_position(display, global_x, global_y).or_else(|| first_monitor(display))
     {
         let geom = monitor.geometry();
         window.set_monitor(Some(&monitor));
@@ -458,16 +726,14 @@ fn setup_cursor_tracking(
     follow_enabled: &Arc<AtomicBool>,
     current_cursor: &Rc<RefCell<Option<protocol::CursorPos>>>,
 ) {
-    let cursor_rx = match hyprland::spawn_cursor_poller(
-        follow_enabled.clone(),
-        Duration::from_millis(8),
-    ) {
-        Ok(rx) => rx,
-        Err(err) => {
-            eprintln!("[glimpse] failed to start Hyprland cursor tracker: {err}");
-            return;
-        }
-    };
+    let cursor_rx =
+        match hyprland::spawn_cursor_poller(follow_enabled.clone(), Duration::from_millis(8)) {
+            Ok(rx) => rx,
+            Err(err) => {
+                eprintln!("[glimpse] failed to start Hyprland cursor tracker: {err}");
+                return;
+            }
+        };
 
     let window = content_window.clone();
     let display = display.clone();
@@ -534,6 +800,9 @@ fn handle_message(
     cursor_anchor: &Rc<RefCell<Option<String>>>,
     follow_mode: &Rc<RefCell<String>>,
     follow_enabled: &Arc<AtomicBool>,
+    kiosk_enabled: &Rc<RefCell<bool>>,
+    kiosk_signal_installed: &Rc<RefCell<bool>>,
+    layer_shell_enabled: bool,
     current_cursor: &Rc<RefCell<Option<protocol::CursorPos>>>,
     current_cursor_tip: &Rc<RefCell<Option<protocol::CursorPos>>>,
     offset_x: f64,
@@ -563,20 +832,68 @@ fn handle_message(
             *hidden.borrow_mut() = false;
             window.set_visible(true);
             window.present();
+            if *kiosk_enabled.borrow() {
+                apply_kiosk_window_mode(window, display, layer_shell_enabled);
+                webview.grab_focus();
+                set_kiosk_mode(
+                    window,
+                    args,
+                    true,
+                    layer_shell_enabled,
+                    kiosk_enabled,
+                    kiosk_signal_installed,
+                    true,
+                );
+            } else {
+                x11::set_keep_above(window, args.floating);
+            }
         }
         InboundMsg::Close => {
+            if *kiosk_enabled.borrow() {
+                set_kiosk_mode(
+                    window,
+                    args,
+                    false,
+                    layer_shell_enabled,
+                    kiosk_enabled,
+                    kiosk_signal_installed,
+                    false,
+                );
+            }
             io::emit(&OutboundMsg::Closed);
             std::process::exit(0);
         }
         InboundMsg::GetInfo => {
-            let live_cursor = hyprland::current_cursor_pos()
-                .ok()
-                .or(*current_cursor.borrow());
+            let live_cursor = current_cursor_position(display).or(*current_cursor.borrow());
             if let Some(cursor_pos) = live_cursor {
                 *current_cursor.borrow_mut() = Some(cursor_pos);
             }
             let info = sysinfo::collect(display, live_cursor, *current_cursor_tip.borrow());
             io::emit(&OutboundMsg::Info { info });
+        }
+        InboundMsg::Kiosk { enabled } => {
+            if enabled && *hidden.borrow() {
+                *kiosk_enabled.borrow_mut() = true;
+                io::emit(&OutboundMsg::Kiosk {
+                    active: false,
+                    reason: Some("kiosk mode deferred until window is shown".to_string()),
+                });
+                return;
+            }
+
+            if enabled {
+                apply_kiosk_window_mode(window, display, layer_shell_enabled);
+                webview.grab_focus();
+            }
+            set_kiosk_mode(
+                window,
+                args,
+                enabled,
+                layer_shell_enabled,
+                kiosk_enabled,
+                kiosk_signal_installed,
+                true,
+            );
         }
         InboundMsg::FollowCursor {
             enabled,
@@ -599,6 +916,15 @@ fn handle_message(
                     spring_state.target = (left, top);
                     spring_state.vel = (0.0, 0.0);
                 }
+            }
+
+            if enabled && !layer_shell_enabled {
+                follow_enabled.store(false, Ordering::Relaxed);
+                *spring_animating.borrow_mut() = false;
+                eprintln!(
+                    "[glimpse] follow-cursor requires launch-time followCursor/floating/positioning on Linux native"
+                );
+                return;
             }
 
             follow_enabled.store(enabled, Ordering::Relaxed);

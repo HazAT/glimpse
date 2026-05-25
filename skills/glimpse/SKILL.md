@@ -69,6 +69,7 @@ win.close();                         // close window
   floating: true,         // always on top
   transparent: true,      // transparent window background
   clickThrough: true,     // mouse passes through window
+  kiosk: true,            // active-display fullscreen plus shortcut inhibition
   followCursor: true,     // window follows mouse cursor
   followMode: 'spring',  // 'snap' (instant, default) or 'spring' (elastic)
   cursorAnchor: 'top-right', // snap point: top-left, top-right, right, bottom-right, bottom-left, left
@@ -495,3 +496,4 @@ Things you can build with Glimpse that you might not have considered (use `win.i
 - **Use `file:///` for ESM imports** — On Windows, Node.js ESM requires `file:///C:/...` URLs for absolute paths. Bare paths like `C:/...` fail with `ERR_UNSUPPORTED_ESM_URL_SCHEME`
 - **Use `addEventListener` instead of inline `onclick`** — Inline event handlers (`onclick="..."`) can be unreliable in WebView2. Always use `document.getElementById('x').addEventListener('click', fn)` instead
 - **Use `floating: true` for sequential prompts** — When opening multiple `prompt()` calls in sequence, subsequent windows may appear behind other windows. Setting `floating: true` ensures they stay on top
+- **Use `kiosk: true` sparingly** — It opens borderless on the active display and requests OS/compositor shortcut inhibition while the window is open; check the `kiosk` event and always provide an obvious completion or close path
