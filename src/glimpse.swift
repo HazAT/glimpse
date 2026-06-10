@@ -259,6 +259,11 @@ class GlimpsePanel: NSWindow {
             return false
         }
 
+        if modifiers == cmd && chars == "w" {
+            close()
+            return true
+        }
+
         let action: Selector?
         switch (chars, modifiers) {
         case ("c", cmd): action = #selector(NSText.copy(_:))
