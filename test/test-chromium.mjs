@@ -79,15 +79,16 @@ async function testSetHTML() {
   await waitFor(win, 'ready');
   pass('first ready');
 
-  // Replace with new HTML
-  win.setHTML('<html><body><div id="x" onclick="glimpse.send({page:2})">page2</div></body></html>');
+  // Replace with new HTML, including non-ASCII text that requires UTF-8 decoding.
+  const expectedText = 'page2 ✕ Close 🚀 Cool!';
+  win.setHTML(`<html><body><div id="x" onclick="glimpse.send({page:2,text:this.textContent})">${expectedText}</div></body></html>`);
   await waitFor(win, 'ready');
   pass('second ready after setHTML');
 
   win.send(`document.getElementById('x').click()`);
   const [data] = await waitFor(win, 'message');
-  if (data?.page === 2) pass('message from new page');
-  else fail(`expected page=2, got ${JSON.stringify(data)}`);
+  if (data?.page === 2 && data?.text === expectedText) pass('message from new page preserves UTF-8 text');
+  else fail(`expected page=2 and text=${JSON.stringify(expectedText)}, got ${JSON.stringify(data)}`);
 
   win.close();
   await waitFor(win, 'closed');
