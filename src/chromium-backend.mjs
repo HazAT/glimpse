@@ -977,7 +977,7 @@ async function main() {
     switch (msg.type) {
       case 'html': {
         // msg.html is base64 encoded
-        const dataUrl = `data:text/html;base64,${msg.html}`;
+        const dataUrl = `data:text/html;charset=utf-8;base64,${msg.html}`;
         await cdp.send('Page.navigate', { url: dataUrl }, sessionId);
         break;
       }
