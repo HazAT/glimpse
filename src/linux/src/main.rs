@@ -252,7 +252,6 @@ fn activate(app: &gtk4::Application, args: &Rc<Args>) {
         setup_cursor_tracking(
             &window,
             &display,
-            args,
             &cursor_anchor,
             &follow_mode,
             offset_x,
@@ -448,7 +447,6 @@ fn set_follow_target(
 fn setup_cursor_tracking(
     content_window: &gtk4::ApplicationWindow,
     display: &gdk4::Display,
-    args: &Rc<Args>,
     cursor_anchor: &Rc<RefCell<Option<String>>>,
     follow_mode: &Rc<RefCell<String>>,
     offset_x: f64,
@@ -471,7 +469,6 @@ fn setup_cursor_tracking(
 
     let window = content_window.clone();
     let display = display.clone();
-    let args = args.clone();
     let cursor_anchor = cursor_anchor.clone();
     let follow_mode = follow_mode.clone();
     let spring = spring.clone();
@@ -491,11 +488,12 @@ fn setup_cursor_tracking(
             if follow_enabled.load(Ordering::Relaxed) {
                 let anchor = cursor_anchor.borrow();
                 let mode = follow_mode.borrow();
+                let (width, height) = window.default_size();
                 let target = cursor::compute_target(
                     cursor_pos.x as f64,
                     cursor_pos.y as f64,
-                    args.width as f64,
-                    args.height as f64,
+                    width as f64,
+                    height as f64,
                     anchor.as_deref(),
                     offset_x,
                     offset_y,
@@ -578,6 +576,9 @@ fn handle_message(
             let info = sysinfo::collect(display, live_cursor, *current_cursor_tip.borrow());
             io::emit(&OutboundMsg::Info { info });
         }
+        InboundMsg::Resize { width, height } => {
+            window.set_default_size(width, height);
+        }
         InboundMsg::FollowCursor {
             enabled,
             anchor,
@@ -619,11 +620,12 @@ fn handle_message(
             }
 
             if let Some(cursor_pos) = *current_cursor.borrow() {
+                let (width, height) = window.default_size();
                 let target = cursor::compute_target(
                     cursor_pos.x as f64,
                     cursor_pos.y as f64,
-                    args.width as f64,
-                    args.height as f64,
+                    width as f64,
+                    height as f64,
                     cursor_anchor.borrow().as_deref(),
                     offset_x,
                     offset_y,
