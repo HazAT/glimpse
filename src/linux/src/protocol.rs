@@ -11,6 +11,7 @@ pub enum InboundMsg {
     Show { title: Option<String> },
     Close,
     GetInfo,
+    Resize { width: i32, height: i32 },
     FollowCursor {
         #[serde(default = "default_true")]
         enabled: bool,
